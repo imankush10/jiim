@@ -1,36 +1,66 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# JiiM Workout Lab
 
-## Getting Started
+Mobile-first workout logging web app built with Next.js App Router, Tailwind CSS v4, MongoDB, and Drizzle installed in the stack.
 
-First, run the development server:
+## Features
+
+- Create your own workout programs with custom exercises, set count, rep ranges, and notes.
+- Start or resume an active workout from a selected program.
+- Log reps, weight, and RPE per set in any exercise order (non-sequential flow).
+- Tick-style completion feedback per exercise.
+- Finish workout workflow.
+- Exercise history and analysis:
+  - Avg weight, avg RPE, and estimated 1RM graph.
+  - Progressive overload score and status.
+  - Estimated muscle-building efficiency score.
+- Smart recommendations for each set based on your last 3 finished workouts for that exercise and set number.
+
+## Tech
+
+- Next.js 16 (App Router)
+- React 19
+- Tailwind CSS v4
+- MongoDB Node driver
+- Drizzle ORM package included in project dependencies
+- Recharts for analytics graphs
+
+## Setup
+
+1. Install dependencies:
+
+```bash
+npm install
+```
+
+2. Create environment file:
+
+```bash
+cp .env.example .env.local
+```
+
+3. Set `MONGODB_URI` and optional `MONGODB_DB_NAME` in `.env.local`.
+
+4. Run dev server:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+5. Open `http://localhost:3000`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Scripts
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `npm run dev` - start local dev server
+- `npm run lint` - run ESLint
+- `npm run build` - create production build
 
-## Learn More
+## API Routes
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `GET /api/programs` - list programs
+- `POST /api/programs` - create program
+- `GET /api/programs/:id` - fetch single program
+- `POST /api/workouts/start` - start/resume workout
+- `GET /api/workouts/active?programId=...` - active workout
+- `PATCH /api/workouts/:id/set` - log or update one set
+- `POST /api/workouts/:id/finish` - finish workout
+- `GET /api/history/exercise?name=...&sets=...` - history, analytics, recommendations

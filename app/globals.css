@@ -1,26 +1,62 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #eef8ee;
+  --foreground: #102018;
+  --accent: #065f46;
+  --card: #ffffff;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-accent: var(--accent);
+  --color-card: var(--card);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), sans-serif;
+}
+
+.glass {
+  background: linear-gradient(
+    140deg,
+    rgb(255 255 255 / 75%),
+    rgb(255 255 255 / 50%)
+  );
+  border: 1px solid rgb(255 255 255 / 60%);
+  box-shadow: 0 10px 30px rgb(16 24 40 / 8%);
+  backdrop-filter: blur(8px);
+}
+
+.field {
+  width: 100%;
+  border-radius: 0.85rem;
+  border: 1px solid rgb(148 163 184 / 45%);
+  background: rgb(255 255 255 / 90%);
+  padding: 0.55rem 0.75rem;
+  font-size: 0.9rem;
+  outline: none;
+}
+
+.field:focus {
+  border-color: rgb(16 185 129 / 80%);
+  box-shadow: 0 0 0 3px rgb(16 185 129 / 20%);
+}
+
+.badge {
+  border-radius: 999px;
+  background: rgb(15 23 42 / 8%);
+  padding: 0.2rem 0.55rem;
+}
+
+.metric-card {
+  border: 1px solid rgb(255 255 255 / 60%);
+  border-radius: 0.9rem;
+  background: rgb(255 255 255 / 85%);
+  padding: 0.65rem;
 }
