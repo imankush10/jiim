@@ -3,6 +3,8 @@ export type ExercisePlan = {
   sets: number;
   minReps: number;
   maxReps: number;
+  day?: string;
+  sessionType?: string;
   notes?: string;
 };
 
@@ -28,6 +30,7 @@ export type WorkoutSession = {
   _id?: string;
   programId: string;
   programName: string;
+  trainingDay?: string;
   startedAt: string;
   finishedAt?: string;
   status: "active" | "finished";

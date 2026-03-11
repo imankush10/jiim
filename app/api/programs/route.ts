@@ -12,6 +12,8 @@ const createProgramSchema = z.object({
         sets: z.number().int().min(1).max(10),
         minReps: z.number().int().min(1).max(30),
         maxReps: z.number().int().min(1).max(40),
+        day: z.string().min(1).optional(),
+        sessionType: z.string().optional(),
         notes: z.string().optional(),
       }),
     )

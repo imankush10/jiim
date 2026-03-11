@@ -23,6 +23,8 @@ type ProgramFormExercise = {
   sets: number;
   minReps: number;
   maxReps: number;
+  day: string;
+  sessionType: string;
   notes: string;
 };
 
@@ -43,6 +45,8 @@ const emptyExercise = {
   sets: 3,
   minReps: 8,
   maxReps: 12,
+  day: "Day 1",
+  sessionType: "",
   notes: "",
 };
 
@@ -50,16 +54,27 @@ const starterForm: ProgramForm = {
   name: "Upper Strength",
   description: "Mobile-first logging program",
   exercises: [
-    { ...emptyExercise, name: "Bench Press" },
-    { ...emptyExercise, name: "Barbell Row" },
+    { ...emptyExercise, day: "Day 1", name: "Bench Press" },
+    { ...emptyExercise, day: "Day 1", name: "Barbell Row" },
   ],
 };
+
+function getExerciseDay(exercise: {
+  day?: string;
+  notes?: string;
+}) {
+  if (exercise.day?.trim()) return exercise.day.trim();
+
+  const notePrefix = exercise.notes?.split("|")[0]?.trim();
+  return notePrefix || "General";
+}
 
 export default function HomePage() {
   const [activeTab, setActiveTab] = useState<"maker" | "workout">("maker");
   const [programs, setPrograms] = useState<WorkoutProgram[]>([]);
   const [programForm, setProgramForm] = useState<ProgramForm>(starterForm);
   const [selectedProgramId, setSelectedProgramId] = useState<string>("");
+  const [selectedDay, setSelectedDay] = useState<string>("General");
   const [activeWorkout, setActiveWorkout] = useState<WorkoutSession | null>(
     null,
   );
@@ -77,6 +92,22 @@ export default function HomePage() {
     [programs, selectedProgramId],
   );
 
+  const availableDays = useMemo(() => {
+    if (!selectedProgram) return [];
+
+    return Array.from(
+      new Set(selectedProgram.exercises.map((exercise) => getExerciseDay(exercise))),
+    );
+  }, [selectedProgram]);
+
+  const exercisesForSelectedDay = useMemo(() => {
+    if (!selectedProgram) return [];
+
+    return selectedProgram.exercises.filter(
+      (exercise) => getExerciseDay(exercise) === selectedDay,
+    );
+  }, [selectedProgram, selectedDay]);
+
   const refreshPrograms = useCallback(async () => {
     const response = await fetch("/api/programs");
     const data = (await response.json()) as WorkoutProgram[];
@@ -92,35 +123,46 @@ export default function HomePage() {
   }, [refreshPrograms]);
 
   useEffect(() => {
-    if (!selectedProgramId) return;
-    void fetchActiveWorkout(selectedProgramId);
-  }, [selectedProgramId]);
+    if (!selectedProgramId || !selectedDay) return;
+    void fetchActiveWorkout(selectedProgramId, selectedDay);
+  }, [selectedProgramId, selectedDay]);
 
   useEffect(() => {
-    if (!selectedProgram || !selectedProgram.exercises.length) {
+    if (!availableDays.length) {
+      setSelectedDay("General");
+      return;
+    }
+
+    setSelectedDay((prev) => (availableDays.includes(prev) ? prev : availableDays[0]));
+  }, [availableDays]);
+
+  useEffect(() => {
+    if (!exercisesForSelectedDay.length) {
       setSelectedExercise("");
       return;
     }
 
     setSelectedExercise((prev) =>
-      selectedProgram.exercises.some((exercise) => exercise.name === prev)
+      exercisesForSelectedDay.some((exercise) => exercise.name === prev)
         ? prev
-        : selectedProgram.exercises[0].name,
+        : exercisesForSelectedDay[0].name,
     );
-  }, [selectedProgram]);
+  }, [exercisesForSelectedDay]);
 
   useEffect(() => {
-    if (!selectedExercise || !selectedProgram) return;
-    const exerciseConfig = selectedProgram.exercises.find(
+    if (!selectedExercise) return;
+    const exerciseConfig = exercisesForSelectedDay.find(
       (e) => e.name === selectedExercise,
     );
     if (!exerciseConfig) return;
 
     void fetchHistory(selectedExercise, exerciseConfig.sets);
-  }, [selectedExercise, selectedProgram]);
+  }, [selectedExercise, exercisesForSelectedDay]);
 
-  async function fetchActiveWorkout(programId: string) {
-    const response = await fetch(`/api/workouts/active?programId=${programId}`);
+  async function fetchActiveWorkout(programId: string, trainingDay: string) {
+    const response = await fetch(
+      `/api/workouts/active?programId=${programId}&trainingDay=${encodeURIComponent(trainingDay)}`,
+    );
     const data = (await response.json()) as WorkoutSession | null;
     setActiveWorkout(data);
   }
@@ -164,7 +206,7 @@ export default function HomePage() {
   }
 
   async function handleStartWorkout() {
-    if (!selectedProgramId) return;
+    if (!selectedProgramId || !selectedDay) return;
 
     setLoading(true);
     setError("");
@@ -172,7 +214,10 @@ export default function HomePage() {
       const response = await fetch("/api/workouts/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ programId: selectedProgramId }),
+        body: JSON.stringify({
+          programId: selectedProgramId,
+          trainingDay: selectedDay,
+        }),
       });
       const data = (await response.json()) as WorkoutSession;
       setActiveWorkout(data);
@@ -200,8 +245,8 @@ export default function HomePage() {
       const finished = (await response.json()) as WorkoutSession;
       setActiveWorkout(null);
 
-      if (selectedExercise && selectedProgram) {
-        const config = selectedProgram.exercises.find(
+      if (selectedExercise) {
+        const config = exercisesForSelectedDay.find(
           (e) => e.name === selectedExercise,
         );
         if (config) {
@@ -219,17 +264,22 @@ export default function HomePage() {
     }
   }
 
-  function getSetInputKey(exerciseName: string, setNumber: number) {
-    return `${exerciseName}__${setNumber}`;
+  function getSetInputKey(
+    trainingDay: string,
+    exerciseName: string,
+    setNumber: number,
+  ) {
+    return `${trainingDay}__${exerciseName}__${setNumber}`;
   }
 
   function updateSetInput(
+    trainingDay: string,
     exerciseName: string,
     setNumber: number,
     field: "reps" | "weight" | "rpe",
     value: number,
   ) {
-    const key = getSetInputKey(exerciseName, setNumber);
+    const key = getSetInputKey(trainingDay, exerciseName, setNumber);
     setSetInputs((prev) => ({
       ...prev,
       [key]: {
@@ -242,10 +292,15 @@ export default function HomePage() {
   }
 
   function applyRecommendation(
+    trainingDay: string,
     exerciseName: string,
     recommendation: SetRecommendation,
   ) {
-    const key = getSetInputKey(exerciseName, recommendation.setNumber);
+    const key = getSetInputKey(
+      trainingDay,
+      exerciseName,
+      recommendation.setNumber,
+    );
     setSetInputs((prev) => ({
       ...prev,
       [key]: {
@@ -256,10 +311,14 @@ export default function HomePage() {
     }));
   }
 
-  async function saveSet(exerciseName: string, setNumber: number) {
+  async function saveSet(
+    trainingDay: string,
+    exerciseName: string,
+    setNumber: number,
+  ) {
     if (!activeWorkout?._id) return;
 
-    const key = getSetInputKey(exerciseName, setNumber);
+    const key = getSetInputKey(trainingDay, exerciseName, setNumber);
     const values = setInputs[key] || { reps: 10, weight: 20, rpe: 7 };
 
     const response = await fetch(`/api/workouts/${activeWorkout._id}/set`, {
@@ -447,6 +506,37 @@ export default function HomePage() {
                         }}
                         required
                       />
+                      <input
+                        className="field"
+                        placeholder="Day (e.g. Monday or Day 1)"
+                        value={exercise.day}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setProgramForm((prev) => ({
+                            ...prev,
+                            exercises: prev.exercises.map((row, rowIdx) =>
+                              rowIdx === idx ? { ...row, day: value } : row,
+                            ),
+                          }));
+                        }}
+                        required
+                      />
+                      <input
+                        className="field"
+                        placeholder="Session type (optional)"
+                        value={exercise.sessionType}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setProgramForm((prev) => ({
+                            ...prev,
+                            exercises: prev.exercises.map((row, rowIdx) =>
+                              rowIdx === idx
+                                ? { ...row, sessionType: value }
+                                : row,
+                            ),
+                          }));
+                        }}
+                      />
                     </div>
                     <textarea
                       className="field mt-2 min-h-16"
@@ -530,15 +620,37 @@ export default function HomePage() {
                   </select>
                   <button
                     onClick={handleStartWorkout}
-                    disabled={!selectedProgramId || loading}
+                    disabled={!selectedProgramId || !selectedDay || loading}
                     className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
                   >
                     {activeWorkout ? "Workout Active" : "Start Workout"}
                   </button>
                 </div>
 
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {availableDays.map((day) => (
+                    <button
+                      key={day}
+                      onClick={() => setSelectedDay(day)}
+                      className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
+                        selectedDay === day
+                          ? "bg-slate-900 text-white"
+                          : "bg-white text-slate-700"
+                      }`}
+                    >
+                      {day}
+                    </button>
+                  ))}
+                </div>
+
+                {selectedDay ? (
+                  <p className="mt-2 text-xs text-slate-600">
+                    Tracking day: <span className="font-semibold">{selectedDay}</span>
+                  </p>
+                ) : null}
+
                 <div className="mt-4 grid gap-2 sm:grid-cols-2">
-                  {selectedProgram?.exercises.map((exercise, idx) => {
+                  {exercisesForSelectedDay.map((exercise, idx) => {
                     const done = completedCount(exercise.name);
                     const isCurrent = exercise.name === selectedExercise;
                     return (
@@ -576,13 +688,17 @@ export default function HomePage() {
                     {Array.from(
                       {
                         length:
-                          selectedProgram.exercises.find(
+                          exercisesForSelectedDay.find(
                             (e) => e.name === selectedExercise,
                           )?.sets || 0,
                       },
                       (_, idx) => {
                         const setNumber = idx + 1;
-                        const key = getSetInputKey(selectedExercise, setNumber);
+                        const key = getSetInputKey(
+                          selectedDay,
+                          selectedExercise,
+                          setNumber,
+                        );
                         const recommendation = history?.recommendations.find(
                           (r) => r.setNumber === setNumber,
                         );
@@ -618,6 +734,7 @@ export default function HomePage() {
                                 value={input.reps}
                                 onChange={(e) =>
                                   updateSetInput(
+                                    selectedDay,
                                     selectedExercise,
                                     setNumber,
                                     "reps",
@@ -633,6 +750,7 @@ export default function HomePage() {
                                 value={input.weight}
                                 onChange={(e) =>
                                   updateSetInput(
+                                    selectedDay,
                                     selectedExercise,
                                     setNumber,
                                     "weight",
@@ -649,6 +767,7 @@ export default function HomePage() {
                                 value={input.rpe}
                                 onChange={(e) =>
                                   updateSetInput(
+                                    selectedDay,
                                     selectedExercise,
                                     setNumber,
                                     "rpe",
@@ -675,7 +794,11 @@ export default function HomePage() {
                               <button
                                 className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white"
                                 onClick={() =>
-                                  saveSet(selectedExercise, setNumber)
+                                  saveSet(
+                                    selectedDay,
+                                    selectedExercise,
+                                    setNumber,
+                                  )
                                 }
                               >
                                 Save Set
@@ -685,6 +808,7 @@ export default function HomePage() {
                                 onClick={() =>
                                   recommendation &&
                                   applyRecommendation(
+                                    selectedDay,
                                     selectedExercise,
                                     recommendation,
                                   )

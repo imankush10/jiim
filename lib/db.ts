@@ -50,11 +50,16 @@ export async function createProgram(
   };
 }
 
-export async function startWorkout(programId: string, programName: string) {
+export async function startWorkout(
+  programId: string,
+  programName: string,
+  trainingDay?: string,
+) {
   const db = await getDb();
   const payload: Omit<WorkoutSession, "_id"> = {
     programId,
     programName,
+    trainingDay,
     startedAt: new Date().toISOString(),
     status: "active",
     sets: [],
@@ -69,12 +74,20 @@ export async function startWorkout(programId: string, programName: string) {
   };
 }
 
-export async function getActiveWorkout(programId?: string) {
+export async function getActiveWorkout(programId?: string, trainingDay?: string) {
   const db = await getDb();
   const filter: Pick<SessionDocument, "status"> &
-    Partial<Pick<SessionDocument, "programId">> = programId
-    ? { status: "active", programId }
-    : { status: "active" };
+    Partial<Pick<SessionDocument, "programId" | "trainingDay">> = {
+    status: "active",
+  };
+
+  if (programId) {
+    filter.programId = programId;
+  }
+
+  if (trainingDay) {
+    filter.trainingDay = trainingDay;
+  }
 
   const row = await db
     .collection<SessionDocument>("workouts")

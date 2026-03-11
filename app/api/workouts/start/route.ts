@@ -4,14 +4,17 @@ import { getProgramById, getActiveWorkout, startWorkout } from "@/lib/db";
 
 const schema = z.object({
   programId: z.string().min(1),
+  trainingDay: z.string().min(1).optional(),
 });
 
 export async function POST(req: Request) {
   try {
     const json = await req.json();
-    const { programId } = schema.parse(json);
+    const { programId, trainingDay } = schema.parse(json);
 
-    const existing = await getActiveWorkout(programId);
+    const normalizedDay = trainingDay || "General";
+
+    const existing = await getActiveWorkout(programId, normalizedDay);
     if (existing) {
       return NextResponse.json(existing);
     }
@@ -24,7 +27,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const workout = await startWorkout(programId, program.name);
+    const workout = await startWorkout(programId, program.name, normalizedDay);
     return NextResponse.json(workout, { status: 201 });
   } catch (error) {
     return NextResponse.json(
