@@ -102,6 +102,9 @@ export default function HomePage() {
   const [extraSets, setExtraSets] = useState<Record<string, number>>({});
   const [ignoredActiveScopes, setIgnoredActiveScopes] = useState<string[]>([]);
   const [draftSets, setDraftSets] = useState<WorkoutSet[]>([]);
+  const [numericDrafts, setNumericDrafts] = useState<Record<string, string>>(
+    {},
+  );
 
   const selectedProgram = useMemo(
     () => programs.find((program) => program._id === selectedProgramId) || null,
@@ -485,6 +488,7 @@ export default function HomePage() {
       setDraftSets([]);
       setSetInputs({});
       setExtraSets({});
+      setNumericDrafts({});
 
       if (selectedExercise) {
         const config = exercisesForSelectedDay.find(
@@ -522,6 +526,7 @@ export default function HomePage() {
     setSelectedExercise("");
     setSetInputs({});
     setExtraSets({});
+    setNumericDrafts({});
     setError("");
   }
 
@@ -543,6 +548,66 @@ export default function HomePage() {
 
   function getDraftStorageKey(workoutId: string) {
     return `jiim_draft_sets_${workoutId}`;
+  }
+
+  function setNumericDraft(key: string, rawValue: string) {
+    if (!/^\d*\.?\d*$/.test(rawValue)) return;
+    setNumericDrafts((prev) => ({ ...prev, [key]: rawValue }));
+  }
+
+  function clearNumericDraft(key: string) {
+    setNumericDrafts((prev) => {
+      if (!(key in prev)) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }
+
+  function getNumericInputValue(key: string, currentValue: number) {
+    return key in numericDrafts ? numericDrafts[key] : String(currentValue);
+  }
+
+  function normalizeNumber(
+    rawValue: string,
+    options: {
+      min?: number;
+      max?: number;
+      integer?: boolean;
+    },
+  ) {
+    const parsed = Number(rawValue);
+    if (!Number.isFinite(parsed)) return null;
+
+    let next = parsed;
+    if (options.integer) next = Math.round(next);
+    if (typeof options.min === "number") next = Math.max(options.min, next);
+    if (typeof options.max === "number") next = Math.min(options.max, next);
+    return next;
+  }
+
+  function commitNumericDraft(
+    key: string,
+    options: {
+      min?: number;
+      max?: number;
+      integer?: boolean;
+      onCommit: (value: number) => void;
+    },
+  ) {
+    const raw = numericDrafts[key];
+    if (raw === undefined) return;
+
+    if (raw === "") {
+      clearNumericDraft(key);
+      return;
+    }
+
+    const next = normalizeNumber(raw, options);
+    if (next !== null) {
+      options.onCommit(next);
+    }
+    clearNumericDraft(key);
   }
 
   function plannedSetCount(exerciseName: string) {
@@ -648,6 +713,28 @@ export default function HomePage() {
     setNumber: number,
   ) {
     const key = getSetInputKey(trainingDay, exerciseName, setNumber);
+
+    const repsKey = `${key}-reps`;
+    const weightKey = `${key}-weight`;
+    const rpeKey = `${key}-rpe`;
+
+    const repsFromDraft =
+      numericDrafts[repsKey] === undefined || numericDrafts[repsKey] === ""
+        ? null
+        : normalizeNumber(numericDrafts[repsKey], {
+            integer: true,
+            min: 0,
+            max: 100,
+          });
+    const weightFromDraft =
+      numericDrafts[weightKey] === undefined || numericDrafts[weightKey] === ""
+        ? null
+        : normalizeNumber(numericDrafts[weightKey], { min: 0, max: 1000 });
+    const rpeFromDraft =
+      numericDrafts[rpeKey] === undefined || numericDrafts[rpeKey] === ""
+        ? null
+        : normalizeNumber(numericDrafts[rpeKey], { min: 1, max: 10 });
+
     const values = setInputs[key] || {
       reps: 10,
       weight: 20,
@@ -658,13 +745,17 @@ export default function HomePage() {
     const nextSet: WorkoutSet = {
       exerciseName,
       setNumber,
-      reps: Number(values.reps),
-      weight: Number(values.weight),
-      rpe: Number(values.rpe),
+      reps: repsFromDraft ?? Number(values.reps),
+      weight: weightFromDraft ?? Number(values.weight),
+      rpe: rpeFromDraft ?? Number(values.rpe),
       isDropSet: values.isDropSet,
       completed: true,
       timestamp: new Date().toISOString(),
     };
+
+    clearNumericDraft(repsKey);
+    clearNumericDraft(weightKey);
+    clearNumericDraft(rpeKey);
 
     setDraftSets((prev) => {
       const filtered = prev.filter(
@@ -772,11 +863,23 @@ export default function HomePage() {
                 </label>
                 <input
                   className="field mt-2 max-w-[120px]"
-                  type="number"
-                  min={1}
-                  max={7}
-                  value={dayNames.length}
-                  onChange={(e) => updateDayCount(Number(e.target.value))}
+                  type="text"
+                  inputMode="numeric"
+                  value={getNumericInputValue(
+                    "maker-day-count",
+                    dayNames.length,
+                  )}
+                  onChange={(e) =>
+                    setNumericDraft("maker-day-count", e.target.value)
+                  }
+                  onBlur={() =>
+                    commitNumericDraft("maker-day-count", {
+                      integer: true,
+                      min: 1,
+                      max: 7,
+                      onCommit: (value) => updateDayCount(value),
+                    })
+                  }
                 />
               </div>
 
@@ -910,22 +1013,38 @@ export default function HomePage() {
                                   </label>
                                   <input
                                     className="field"
-                                    type="number"
-                                    min={1}
-                                    max={10}
-                                    value={exercise.sets}
-                                    onChange={(e) => {
-                                      const value = Number(e.target.value);
-                                      setProgramForm((prev) => ({
-                                        ...prev,
-                                        exercises: prev.exercises.map(
-                                          (row, rowIdx) =>
-                                            rowIdx === absoluteIndex
-                                              ? { ...row, sets: value }
-                                              : row,
-                                        ),
-                                      }));
-                                    }}
+                                    type="text"
+                                    inputMode="numeric"
+                                    value={getNumericInputValue(
+                                      `maker-${absoluteIndex}-sets`,
+                                      exercise.sets,
+                                    )}
+                                    onChange={(e) =>
+                                      setNumericDraft(
+                                        `maker-${absoluteIndex}-sets`,
+                                        e.target.value,
+                                      )
+                                    }
+                                    onBlur={() =>
+                                      commitNumericDraft(
+                                        `maker-${absoluteIndex}-sets`,
+                                        {
+                                          integer: true,
+                                          min: 1,
+                                          max: 10,
+                                          onCommit: (value) =>
+                                            setProgramForm((prev) => ({
+                                              ...prev,
+                                              exercises: prev.exercises.map(
+                                                (row, rowIdx) =>
+                                                  rowIdx === absoluteIndex
+                                                    ? { ...row, sets: value }
+                                                    : row,
+                                              ),
+                                            })),
+                                        },
+                                      )
+                                    }
                                     required
                                   />
                                 </div>
@@ -936,22 +1055,38 @@ export default function HomePage() {
                                   </label>
                                   <input
                                     className="field"
-                                    type="number"
-                                    min={1}
-                                    max={30}
-                                    value={exercise.minReps}
-                                    onChange={(e) => {
-                                      const value = Number(e.target.value);
-                                      setProgramForm((prev) => ({
-                                        ...prev,
-                                        exercises: prev.exercises.map(
-                                          (row, rowIdx) =>
-                                            rowIdx === absoluteIndex
-                                              ? { ...row, minReps: value }
-                                              : row,
-                                        ),
-                                      }));
-                                    }}
+                                    type="text"
+                                    inputMode="numeric"
+                                    value={getNumericInputValue(
+                                      `maker-${absoluteIndex}-min`,
+                                      exercise.minReps,
+                                    )}
+                                    onChange={(e) =>
+                                      setNumericDraft(
+                                        `maker-${absoluteIndex}-min`,
+                                        e.target.value,
+                                      )
+                                    }
+                                    onBlur={() =>
+                                      commitNumericDraft(
+                                        `maker-${absoluteIndex}-min`,
+                                        {
+                                          integer: true,
+                                          min: 1,
+                                          max: 30,
+                                          onCommit: (value) =>
+                                            setProgramForm((prev) => ({
+                                              ...prev,
+                                              exercises: prev.exercises.map(
+                                                (row, rowIdx) =>
+                                                  rowIdx === absoluteIndex
+                                                    ? { ...row, minReps: value }
+                                                    : row,
+                                              ),
+                                            })),
+                                        },
+                                      )
+                                    }
                                     required
                                   />
                                 </div>
@@ -962,22 +1097,38 @@ export default function HomePage() {
                                   </label>
                                   <input
                                     className="field"
-                                    type="number"
-                                    min={1}
-                                    max={40}
-                                    value={exercise.maxReps}
-                                    onChange={(e) => {
-                                      const value = Number(e.target.value);
-                                      setProgramForm((prev) => ({
-                                        ...prev,
-                                        exercises: prev.exercises.map(
-                                          (row, rowIdx) =>
-                                            rowIdx === absoluteIndex
-                                              ? { ...row, maxReps: value }
-                                              : row,
-                                        ),
-                                      }));
-                                    }}
+                                    type="text"
+                                    inputMode="numeric"
+                                    value={getNumericInputValue(
+                                      `maker-${absoluteIndex}-max`,
+                                      exercise.maxReps,
+                                    )}
+                                    onChange={(e) =>
+                                      setNumericDraft(
+                                        `maker-${absoluteIndex}-max`,
+                                        e.target.value,
+                                      )
+                                    }
+                                    onBlur={() =>
+                                      commitNumericDraft(
+                                        `maker-${absoluteIndex}-max`,
+                                        {
+                                          integer: true,
+                                          min: 1,
+                                          max: 40,
+                                          onCommit: (value) =>
+                                            setProgramForm((prev) => ({
+                                              ...prev,
+                                              exercises: prev.exercises.map(
+                                                (row, rowIdx) =>
+                                                  rowIdx === absoluteIndex
+                                                    ? { ...row, maxReps: value }
+                                                    : row,
+                                              ),
+                                            })),
+                                        },
+                                      )
+                                    }
                                     required
                                   />
                                 </div>
@@ -1291,17 +1442,32 @@ export default function HomePage() {
                                 </label>
                                 <input
                                   className="field"
-                                  type="number"
-                                  min={0}
-                                  value={input.reps}
+                                  type="text"
+                                  inputMode="numeric"
+                                  value={getNumericInputValue(
+                                    `${key}-reps`,
+                                    input.reps,
+                                  )}
                                   onChange={(e) =>
-                                    updateSetInput(
-                                      selectedDay,
-                                      selectedExercise,
-                                      setNumber,
-                                      "reps",
-                                      Number(e.target.value),
+                                    setNumericDraft(
+                                      `${key}-reps`,
+                                      e.target.value,
                                     )
+                                  }
+                                  onBlur={() =>
+                                    commitNumericDraft(`${key}-reps`, {
+                                      integer: true,
+                                      min: 0,
+                                      max: 100,
+                                      onCommit: (value) =>
+                                        updateSetInput(
+                                          selectedDay,
+                                          selectedExercise,
+                                          setNumber,
+                                          "reps",
+                                          value,
+                                        ),
+                                    })
                                   }
                                 />
                               </div>
@@ -1311,18 +1477,31 @@ export default function HomePage() {
                                 </label>
                                 <input
                                   className="field"
-                                  type="number"
-                                  min={0}
-                                  step="0.5"
-                                  value={input.weight}
+                                  type="text"
+                                  inputMode="decimal"
+                                  value={getNumericInputValue(
+                                    `${key}-weight`,
+                                    input.weight,
+                                  )}
                                   onChange={(e) =>
-                                    updateSetInput(
-                                      selectedDay,
-                                      selectedExercise,
-                                      setNumber,
-                                      "weight",
-                                      Number(e.target.value),
+                                    setNumericDraft(
+                                      `${key}-weight`,
+                                      e.target.value,
                                     )
+                                  }
+                                  onBlur={() =>
+                                    commitNumericDraft(`${key}-weight`, {
+                                      min: 0,
+                                      max: 1000,
+                                      onCommit: (value) =>
+                                        updateSetInput(
+                                          selectedDay,
+                                          selectedExercise,
+                                          setNumber,
+                                          "weight",
+                                          value,
+                                        ),
+                                    })
                                   }
                                 />
                               </div>
@@ -1332,19 +1511,31 @@ export default function HomePage() {
                                 </label>
                                 <input
                                   className="field"
-                                  type="number"
-                                  min={1}
-                                  max={10}
-                                  step="0.5"
-                                  value={input.rpe}
+                                  type="text"
+                                  inputMode="decimal"
+                                  value={getNumericInputValue(
+                                    `${key}-rpe`,
+                                    input.rpe,
+                                  )}
                                   onChange={(e) =>
-                                    updateSetInput(
-                                      selectedDay,
-                                      selectedExercise,
-                                      setNumber,
-                                      "rpe",
-                                      Number(e.target.value),
+                                    setNumericDraft(
+                                      `${key}-rpe`,
+                                      e.target.value,
                                     )
+                                  }
+                                  onBlur={() =>
+                                    commitNumericDraft(`${key}-rpe`, {
+                                      min: 1,
+                                      max: 10,
+                                      onCommit: (value) =>
+                                        updateSetInput(
+                                          selectedDay,
+                                          selectedExercise,
+                                          setNumber,
+                                          "rpe",
+                                          value,
+                                        ),
+                                    })
                                   }
                                 />
                               </div>
