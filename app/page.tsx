@@ -212,7 +212,12 @@ export default function HomePage() {
     );
     if (!exerciseConfig) return;
 
-    void fetchHistory(selectedExercise, exerciseConfig.sets);
+    void fetchHistory(
+      selectedExercise,
+      exerciseConfig.sets,
+      exerciseConfig.minReps,
+      exerciseConfig.maxReps,
+    );
   }, [selectedExercise, exercisesForSelectedDay]);
 
   useEffect(() => {
@@ -266,9 +271,14 @@ export default function HomePage() {
     );
   }, [activeWorkout, draftSets]);
 
-  async function fetchHistory(exerciseName: string, sets: number) {
+  async function fetchHistory(
+    exerciseName: string,
+    sets: number,
+    minReps: number,
+    maxReps: number,
+  ) {
     const response = await fetch(
-      `/api/history/exercise?name=${encodeURIComponent(exerciseName)}&sets=${sets}`,
+      `/api/history/exercise?name=${encodeURIComponent(exerciseName)}&sets=${sets}&minReps=${minReps}&maxReps=${maxReps}`,
     );
     const data = (await response.json()) as HistoryPayload;
     setHistory(data);
@@ -495,7 +505,12 @@ export default function HomePage() {
           (e) => e.name === selectedExercise,
         );
         if (config) {
-          await fetchHistory(selectedExercise, config.sets);
+          await fetchHistory(
+            selectedExercise,
+            config.sets,
+            config.minReps,
+            config.maxReps,
+          );
         }
       }
 
@@ -1557,6 +1572,11 @@ export default function HomePage() {
                               <span className="badge">
                                 RPE {recommendation?.recommendedRpe || 7}
                               </span>
+                              {recommendation?.progressionNote ? (
+                                <span className="badge bg-blue-100 text-blue-800">
+                                  {recommendation.progressionNote}
+                                </span>
+                              ) : null}
                             </div>
 
                             <div className="mt-3 flex gap-2">

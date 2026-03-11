@@ -43,6 +43,7 @@ export type SetRecommendation = {
   recommendedReps: number;
   recommendedWeight: number;
   recommendedRpe: number;
+  progressionNote?: string;
 };
 
 export type ExerciseAnalysisPoint = {
