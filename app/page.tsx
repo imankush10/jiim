@@ -99,6 +99,7 @@ export default function HomePage() {
     >
   >({});
   const [extraSets, setExtraSets] = useState<Record<string, number>>({});
+  const [ignoredActiveScopes, setIgnoredActiveScopes] = useState<string[]>([]);
 
   const selectedProgram = useMemo(
     () => programs.find((program) => program._id === selectedProgramId) || null,
@@ -148,6 +149,24 @@ export default function HomePage() {
     }
   }, [selectedProgramId]);
 
+  const fetchActiveWorkout = useCallback(
+    async (programId: string, trainingDay: string) => {
+      const response = await fetch(
+        `/api/workouts/active?programId=${programId}&trainingDay=${encodeURIComponent(trainingDay)}`,
+      );
+      const data = (await response.json()) as WorkoutSession | null;
+
+      const scopeKey = getWorkoutScopeKey(programId, trainingDay);
+      if (ignoredActiveScopes.includes(scopeKey)) {
+        setActiveWorkout(null);
+        return;
+      }
+
+      setActiveWorkout(data);
+    },
+    [ignoredActiveScopes],
+  );
+
   useEffect(() => {
     void refreshPrograms();
   }, [refreshPrograms]);
@@ -155,7 +174,7 @@ export default function HomePage() {
   useEffect(() => {
     if (!selectedProgramId || !selectedDay) return;
     void fetchActiveWorkout(selectedProgramId, selectedDay);
-  }, [selectedProgramId, selectedDay]);
+  }, [selectedProgramId, selectedDay, fetchActiveWorkout]);
 
   useEffect(() => {
     if (!availableDays.length) {
@@ -211,14 +230,6 @@ export default function HomePage() {
 
     setExtraSets((prev) => ({ ...prev, ...computed }));
   }, [activeWorkout, selectedDay, exercisesForSelectedDay]);
-
-  async function fetchActiveWorkout(programId: string, trainingDay: string) {
-    const response = await fetch(
-      `/api/workouts/active?programId=${programId}&trainingDay=${encodeURIComponent(trainingDay)}`,
-    );
-    const data = (await response.json()) as WorkoutSession | null;
-    setActiveWorkout(data);
-  }
 
   async function fetchHistory(exerciseName: string, sets: number) {
     const response = await fetch(
@@ -397,6 +408,9 @@ export default function HomePage() {
   async function handleStartWorkout() {
     if (!selectedProgramId || !selectedDay) return;
 
+    const scopeKey = getWorkoutScopeKey(selectedProgramId, selectedDay);
+    setIgnoredActiveScopes((prev) => prev.filter((key) => key !== scopeKey));
+
     setLoading(true);
     setError("");
     try {
@@ -453,6 +467,21 @@ export default function HomePage() {
     }
   }
 
+  function handleCancelWorkout() {
+    if (!selectedProgramId || !selectedDay) return;
+
+    const scopeKey = getWorkoutScopeKey(selectedProgramId, selectedDay);
+    setIgnoredActiveScopes((prev) =>
+      prev.includes(scopeKey) ? prev : [...prev, scopeKey],
+    );
+
+    setActiveWorkout(null);
+    setSelectedExercise("");
+    setSetInputs({});
+    setExtraSets({});
+    setError("");
+  }
+
   function getSetInputKey(
     trainingDay: string,
     exerciseName: string,
@@ -463,6 +492,10 @@ export default function HomePage() {
 
   function getExerciseKey(trainingDay: string, exerciseName: string) {
     return `${trainingDay}__${exerciseName}`;
+  }
+
+  function getWorkoutScopeKey(programId: string, trainingDay: string) {
+    return `${programId}__${trainingDay}`;
   }
 
   function plannedSetCount(exerciseName: string) {
@@ -721,12 +754,17 @@ export default function HomePage() {
                       key={day}
                       className="rounded-2xl border border-white/50 bg-white/70 p-3"
                     >
-                      <div className="mb-3 flex flex-wrap items-center gap-2">
-                        <input
-                          className="field max-w-[220px]"
-                          value={day}
-                          onChange={(e) => renameDay(day, e.target.value)}
-                        />
+                      <div className="mb-3 flex flex-wrap items-end gap-2">
+                        <div className="flex flex-col gap-1">
+                          <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                            Day Name
+                          </label>
+                          <input
+                            className="field max-w-[220px]"
+                            value={day}
+                            onChange={(e) => renameDay(day, e.target.value)}
+                          />
+                        </div>
                         <button
                           type="button"
                           className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold"
@@ -800,125 +838,163 @@ export default function HomePage() {
                               </div>
 
                               <div className="grid gap-2 sm:grid-cols-2">
-                                <input
-                                  className="field"
-                                  placeholder="Exercise"
-                                  value={exercise.name}
-                                  onChange={(e) => {
-                                    const value = e.target.value;
-                                    setProgramForm((prev) => ({
-                                      ...prev,
-                                      exercises: prev.exercises.map(
-                                        (row, rowIdx) =>
-                                          rowIdx === absoluteIndex
-                                            ? { ...row, name: value }
-                                            : row,
-                                      ),
-                                    }));
-                                  }}
-                                  required
-                                />
-                                <input
-                                  className="field"
-                                  type="number"
-                                  min={1}
-                                  max={10}
-                                  placeholder="Sets"
-                                  value={exercise.sets}
-                                  onChange={(e) => {
-                                    const value = Number(e.target.value);
-                                    setProgramForm((prev) => ({
-                                      ...prev,
-                                      exercises: prev.exercises.map(
-                                        (row, rowIdx) =>
-                                          rowIdx === absoluteIndex
-                                            ? { ...row, sets: value }
-                                            : row,
-                                      ),
-                                    }));
-                                  }}
-                                  required
-                                />
-                                <input
-                                  className="field"
-                                  type="number"
-                                  min={1}
-                                  max={30}
-                                  placeholder="Min reps"
-                                  value={exercise.minReps}
-                                  onChange={(e) => {
-                                    const value = Number(e.target.value);
-                                    setProgramForm((prev) => ({
-                                      ...prev,
-                                      exercises: prev.exercises.map(
-                                        (row, rowIdx) =>
-                                          rowIdx === absoluteIndex
-                                            ? { ...row, minReps: value }
-                                            : row,
-                                      ),
-                                    }));
-                                  }}
-                                  required
-                                />
-                                <input
-                                  className="field"
-                                  type="number"
-                                  min={1}
-                                  max={40}
-                                  placeholder="Max reps"
-                                  value={exercise.maxReps}
-                                  onChange={(e) => {
-                                    const value = Number(e.target.value);
-                                    setProgramForm((prev) => ({
-                                      ...prev,
-                                      exercises: prev.exercises.map(
-                                        (row, rowIdx) =>
-                                          rowIdx === absoluteIndex
-                                            ? { ...row, maxReps: value }
-                                            : row,
-                                      ),
-                                    }));
-                                  }}
-                                  required
-                                />
-                                <input
-                                  className="field"
-                                  placeholder="Session type (optional)"
-                                  value={exercise.sessionType}
-                                  onChange={(e) => {
-                                    const value = e.target.value;
-                                    setProgramForm((prev) => ({
-                                      ...prev,
-                                      exercises: prev.exercises.map(
-                                        (row, rowIdx) =>
-                                          rowIdx === absoluteIndex
-                                            ? { ...row, sessionType: value }
-                                            : row,
-                                      ),
-                                    }));
-                                  }}
-                                />
-                                <div className="flex items-center rounded-lg bg-slate-50 px-3 text-xs font-semibold text-slate-500">
-                                  {day}
+                                <div className="flex flex-col gap-1">
+                                  <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                    Exercise
+                                  </label>
+                                  <input
+                                    className="field"
+                                    placeholder="Exercise"
+                                    value={exercise.name}
+                                    onChange={(e) => {
+                                      const value = e.target.value;
+                                      setProgramForm((prev) => ({
+                                        ...prev,
+                                        exercises: prev.exercises.map(
+                                          (row, rowIdx) =>
+                                            rowIdx === absoluteIndex
+                                              ? { ...row, name: value }
+                                              : row,
+                                        ),
+                                      }));
+                                    }}
+                                    required
+                                  />
+                                </div>
+
+                                <div className="flex flex-col gap-1">
+                                  <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                    Sets
+                                  </label>
+                                  <input
+                                    className="field"
+                                    type="number"
+                                    min={1}
+                                    max={10}
+                                    value={exercise.sets}
+                                    onChange={(e) => {
+                                      const value = Number(e.target.value);
+                                      setProgramForm((prev) => ({
+                                        ...prev,
+                                        exercises: prev.exercises.map(
+                                          (row, rowIdx) =>
+                                            rowIdx === absoluteIndex
+                                              ? { ...row, sets: value }
+                                              : row,
+                                        ),
+                                      }));
+                                    }}
+                                    required
+                                  />
+                                </div>
+
+                                <div className="flex flex-col gap-1">
+                                  <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                    Min Reps
+                                  </label>
+                                  <input
+                                    className="field"
+                                    type="number"
+                                    min={1}
+                                    max={30}
+                                    value={exercise.minReps}
+                                    onChange={(e) => {
+                                      const value = Number(e.target.value);
+                                      setProgramForm((prev) => ({
+                                        ...prev,
+                                        exercises: prev.exercises.map(
+                                          (row, rowIdx) =>
+                                            rowIdx === absoluteIndex
+                                              ? { ...row, minReps: value }
+                                              : row,
+                                        ),
+                                      }));
+                                    }}
+                                    required
+                                  />
+                                </div>
+
+                                <div className="flex flex-col gap-1">
+                                  <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                    Max Reps
+                                  </label>
+                                  <input
+                                    className="field"
+                                    type="number"
+                                    min={1}
+                                    max={40}
+                                    value={exercise.maxReps}
+                                    onChange={(e) => {
+                                      const value = Number(e.target.value);
+                                      setProgramForm((prev) => ({
+                                        ...prev,
+                                        exercises: prev.exercises.map(
+                                          (row, rowIdx) =>
+                                            rowIdx === absoluteIndex
+                                              ? { ...row, maxReps: value }
+                                              : row,
+                                        ),
+                                      }));
+                                    }}
+                                    required
+                                  />
+                                </div>
+
+                                <div className="flex flex-col gap-1">
+                                  <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                    Session Type
+                                  </label>
+                                  <input
+                                    className="field"
+                                    placeholder="Session type (optional)"
+                                    value={exercise.sessionType}
+                                    onChange={(e) => {
+                                      const value = e.target.value;
+                                      setProgramForm((prev) => ({
+                                        ...prev,
+                                        exercises: prev.exercises.map(
+                                          (row, rowIdx) =>
+                                            rowIdx === absoluteIndex
+                                              ? { ...row, sessionType: value }
+                                              : row,
+                                        ),
+                                      }));
+                                    }}
+                                  />
+                                </div>
+
+                                <div className="flex flex-col gap-1">
+                                  <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                    Day
+                                  </label>
+                                  <div className="flex h-[42px] items-center rounded-lg bg-slate-50 px-3 text-xs font-semibold text-slate-500">
+                                    {day}
+                                  </div>
                                 </div>
                               </div>
-                              <textarea
-                                className="field mt-2 min-h-16"
-                                placeholder="Notes"
-                                value={exercise.notes}
-                                onChange={(e) => {
-                                  const value = e.target.value;
-                                  setProgramForm((prev) => ({
-                                    ...prev,
-                                    exercises: prev.exercises.map(
-                                      (row, rowIdx) =>
-                                        rowIdx === absoluteIndex
-                                          ? { ...row, notes: value }
-                                          : row,
-                                    ),
-                                  }));
-                                }}
-                              />
+
+                              <div className="mt-2 flex flex-col gap-1">
+                                <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                  Notes
+                                </label>
+                                <textarea
+                                  className="field min-h-16"
+                                  placeholder="Notes"
+                                  value={exercise.notes}
+                                  onChange={(e) => {
+                                    const value = e.target.value;
+                                    setProgramForm((prev) => ({
+                                      ...prev,
+                                      exercises: prev.exercises.map(
+                                        (row, rowIdx) =>
+                                          rowIdx === absoluteIndex
+                                            ? { ...row, notes: value }
+                                            : row,
+                                      ),
+                                    }));
+                                  }}
+                                />
+                              </div>
                             </div>
                           ),
                         )}
@@ -1037,6 +1113,15 @@ export default function HomePage() {
                   </p>
                 ) : null}
 
+                {activeWorkout ? (
+                  <button
+                    onClick={handleCancelWorkout}
+                    className="mt-2 rounded-lg bg-rose-100 px-3 py-2 text-xs font-semibold text-rose-700"
+                  >
+                    Cancel Workout (Local Reset)
+                  </button>
+                ) : null}
+
                 <div className="mt-4 grid gap-2 sm:grid-cols-2">
                   {exercisesForSelectedDay.map((exercise, idx) => {
                     const done = completedCount(exercise.name);
@@ -1149,54 +1234,69 @@ export default function HomePage() {
                             </label>
 
                             <div className="grid grid-cols-3 gap-2">
-                              <input
-                                className="field"
-                                type="number"
-                                min={0}
-                                value={input.reps}
-                                onChange={(e) =>
-                                  updateSetInput(
-                                    selectedDay,
-                                    selectedExercise,
-                                    setNumber,
-                                    "reps",
-                                    Number(e.target.value),
-                                  )
-                                }
-                              />
-                              <input
-                                className="field"
-                                type="number"
-                                min={0}
-                                step="0.5"
-                                value={input.weight}
-                                onChange={(e) =>
-                                  updateSetInput(
-                                    selectedDay,
-                                    selectedExercise,
-                                    setNumber,
-                                    "weight",
-                                    Number(e.target.value),
-                                  )
-                                }
-                              />
-                              <input
-                                className="field"
-                                type="number"
-                                min={1}
-                                max={10}
-                                step="0.5"
-                                value={input.rpe}
-                                onChange={(e) =>
-                                  updateSetInput(
-                                    selectedDay,
-                                    selectedExercise,
-                                    setNumber,
-                                    "rpe",
-                                    Number(e.target.value),
-                                  )
-                                }
-                              />
+                              <div className="flex flex-col gap-1">
+                                <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                  Reps
+                                </label>
+                                <input
+                                  className="field"
+                                  type="number"
+                                  min={0}
+                                  value={input.reps}
+                                  onChange={(e) =>
+                                    updateSetInput(
+                                      selectedDay,
+                                      selectedExercise,
+                                      setNumber,
+                                      "reps",
+                                      Number(e.target.value),
+                                    )
+                                  }
+                                />
+                              </div>
+                              <div className="flex flex-col gap-1">
+                                <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                  Weight
+                                </label>
+                                <input
+                                  className="field"
+                                  type="number"
+                                  min={0}
+                                  step="0.5"
+                                  value={input.weight}
+                                  onChange={(e) =>
+                                    updateSetInput(
+                                      selectedDay,
+                                      selectedExercise,
+                                      setNumber,
+                                      "weight",
+                                      Number(e.target.value),
+                                    )
+                                  }
+                                />
+                              </div>
+                              <div className="flex flex-col gap-1">
+                                <label className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                  RPE
+                                </label>
+                                <input
+                                  className="field"
+                                  type="number"
+                                  min={1}
+                                  max={10}
+                                  step="0.5"
+                                  value={input.rpe}
+                                  onChange={(e) =>
+                                    updateSetInput(
+                                      selectedDay,
+                                      selectedExercise,
+                                      setNumber,
+                                      "rpe",
+                                      Number(e.target.value),
+                                    )
+                                  }
+                                />
+                              </div>
                             </div>
 
                             <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-700">
