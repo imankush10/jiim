@@ -1,7 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  Bar,
+  BarChart,
   CartesianGrid,
   Legend,
   Line,
@@ -78,7 +80,9 @@ function getExerciseSessionType(exercise: {
 }
 
 export default function HomePage() {
-  const [activeTab, setActiveTab] = useState<"maker" | "workout">("maker");
+  const [activeTab, setActiveTab] = useState<"maker" | "workout" | "sessions">(
+    "maker",
+  );
   const [programs, setPrograms] = useState<WorkoutProgram[]>([]);
   const [programForm, setProgramForm] = useState<ProgramForm>(starterForm);
   const [dayNames, setDayNames] = useState<string[]>(["Day 1"]);
@@ -105,6 +109,22 @@ export default function HomePage() {
   const [numericDrafts, setNumericDrafts] = useState<Record<string, string>>(
     {},
   );
+
+  // Exercise substitutions: originalName → substituteName
+  const [substitutions, setSubstitutions] = useState<Record<string, string>>(
+    {},
+  );
+  const [subEditingFor, setSubEditingFor] = useState<string | null>(null);
+  const [subInputDraft, setSubInputDraft] = useState<Record<string, string>>(
+    {},
+  );
+
+  // Past sessions viewer
+  const [pastSessions, setPastSessions] = useState<WorkoutSession[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [expandedSession, setExpandedSession] = useState<string | null>(null);
+  const [sessionsProgramFilter, setSessionsProgramFilter] =
+    useState<string>("");
 
   const selectedProgram = useMemo(
     () => programs.find((program) => program._id === selectedProgramId) || null,
@@ -143,6 +163,29 @@ export default function HomePage() {
       (exercise) => getExerciseDay(exercise) === selectedDay,
     );
   }, [selectedProgram, selectedDay]);
+
+  const lastSessionBreakdown = useMemo(() => {
+    if (!history?.workouts?.length || !selectedExercise) return [];
+    const sorted = [...history.workouts].sort(
+      (a, b) =>
+        +new Date(b.finishedAt || b.startedAt) -
+        +new Date(a.finishedAt || a.startedAt),
+    );
+    return (sorted[0]?.sets ?? [])
+      .filter(
+        (s) =>
+          s.completed &&
+          !s.isDropSet &&
+          s.exerciseName.toLowerCase() === selectedExercise.toLowerCase(),
+      )
+      .sort((a, b) => a.setNumber - b.setNumber)
+      .map((s) => ({
+        set: `Set ${s.setNumber}`,
+        weight: s.weight,
+        reps: s.reps,
+        rpe: s.rpe,
+      }));
+  }, [history, selectedExercise]);
 
   const refreshPrograms = useCallback(async () => {
     const response = await fetch("/api/programs");
@@ -270,6 +313,26 @@ export default function HomePage() {
       JSON.stringify(draftSets),
     );
   }, [activeWorkout, draftSets]);
+
+  useEffect(() => {
+    if (activeTab !== "sessions" || !sessionsProgramFilter) return;
+    void fetchSessions(sessionsProgramFilter);
+  }, [activeTab, sessionsProgramFilter]);
+
+  async function fetchSessions(programId: string) {
+    setSessionsLoading(true);
+    try {
+      const res = await fetch(
+        `/api/workouts/sessions?programId=${programId}&limit=30`,
+      );
+      const data = (await res.json()) as { sessions: WorkoutSession[] };
+      setPastSessions(data.sessions);
+    } catch {
+      // silently handle
+    } finally {
+      setSessionsLoading(false);
+    }
+  }
 
   async function fetchHistory(
     exerciseName: string,
@@ -542,6 +605,9 @@ export default function HomePage() {
     setSetInputs({});
     setExtraSets({});
     setNumericDrafts({});
+    setSubstitutions({});
+    setSubEditingFor(null);
+    setSubInputDraft({});
     setError("");
   }
 
@@ -722,6 +788,22 @@ export default function HomePage() {
     });
   }
 
+  function confirmSubstitution(originalName: string) {
+    const sub = subInputDraft[originalName]?.trim();
+    if (sub && sub !== originalName) {
+      setSubstitutions((prev) => ({ ...prev, [originalName]: sub }));
+    }
+    setSubEditingFor(null);
+  }
+
+  function clearSubstitution(originalName: string) {
+    setSubstitutions((prev) => {
+      const next = { ...prev };
+      delete next[originalName];
+      return next;
+    });
+  }
+
   async function saveSet(
     trainingDay: string,
     exerciseName: string,
@@ -757,8 +839,11 @@ export default function HomePage() {
       isDropSet: false,
     };
 
+    const loggedName = substitutions[exerciseName] ?? exerciseName;
+
     const nextSet: WorkoutSet = {
-      exerciseName,
+      exerciseName: loggedName,
+      substitutedFor: loggedName !== exerciseName ? exerciseName : undefined,
       setNumber,
       reps: repsFromDraft ?? Number(values.reps),
       weight: weightFromDraft ?? Number(values.weight),
@@ -775,16 +860,20 @@ export default function HomePage() {
     setDraftSets((prev) => {
       const filtered = prev.filter(
         (set) =>
-          !(set.exerciseName === exerciseName && set.setNumber === setNumber),
+          !(set.exerciseName === loggedName && set.setNumber === setNumber),
       );
       return filtered.concat(nextSet);
     });
   }
 
   function completedCount(exerciseName: string) {
+    const loggedName = substitutions[exerciseName] ?? exerciseName;
     return (
       draftSets.filter(
-        (set) => set.exerciseName === exerciseName && set.completed,
+        (set) =>
+          set.completed &&
+          (set.exerciseName === loggedName ||
+            set.substitutedFor === exerciseName),
       ).length || 0
     );
   }
@@ -806,9 +895,9 @@ export default function HomePage() {
           </p>
         </header>
 
-        <nav className="grid grid-cols-2 gap-2 rounded-2xl bg-white/60 p-2 shadow-sm backdrop-blur sm:max-w-md">
+        <nav className="grid grid-cols-3 gap-2 rounded-2xl bg-white/60 p-2 shadow-sm backdrop-blur sm:max-w-lg">
           <button
-            className={`rounded-xl px-4 py-3 text-sm font-semibold ${
+            className={`rounded-xl px-3 py-3 text-sm font-semibold ${
               activeTab === "maker"
                 ? "bg-slate-900 text-white"
                 : "bg-white text-slate-800"
@@ -818,7 +907,7 @@ export default function HomePage() {
             Program Maker
           </button>
           <button
-            className={`rounded-xl px-4 py-3 text-sm font-semibold ${
+            className={`rounded-xl px-3 py-3 text-sm font-semibold ${
               activeTab === "workout"
                 ? "bg-slate-900 text-white"
                 : "bg-white text-slate-800"
@@ -826,6 +915,19 @@ export default function HomePage() {
             onClick={() => setActiveTab("workout")}
           >
             Start Workout
+          </button>
+          <button
+            className={`rounded-xl px-3 py-3 text-sm font-semibold ${
+              activeTab === "sessions"
+                ? "bg-slate-900 text-white"
+                : "bg-white text-slate-800"
+            }`}
+            onClick={() => {
+              setSessionsProgramFilter(selectedProgramId || "");
+              setActiveTab("sessions");
+            }}
+          >
+            Sessions
           </button>
         </nav>
 
@@ -1271,6 +1373,172 @@ export default function HomePage() {
               </div>
             </aside>
           </section>
+        ) : activeTab === "sessions" ? (
+          <section className="flex flex-col gap-4">
+            <div className="glass rounded-3xl p-4 sm:p-6">
+              <h2 className="text-xl font-bold">Past Sessions</h2>
+              <p className="mt-1 text-sm text-slate-700">
+                All finished workouts for a program, newest first.
+              </p>
+
+              <div className="mt-3">
+                <select
+                  className="field w-full sm:max-w-xs"
+                  value={sessionsProgramFilter}
+                  onChange={(e) => setSessionsProgramFilter(e.target.value)}
+                >
+                  <option value="">Select program&hellip;</option>
+                  {programs.map((p) => (
+                    <option key={p._id} value={p._id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {sessionsLoading ? (
+                <p className="mt-4 text-sm text-slate-500">Loading&hellip;</p>
+              ) : !sessionsProgramFilter ? (
+                <p className="mt-4 text-sm text-slate-500">
+                  Select a program above to view its sessions.
+                </p>
+              ) : pastSessions.length === 0 ? (
+                <p className="mt-4 text-sm text-slate-500">
+                  No finished sessions yet for this program.
+                </p>
+              ) : (
+                <div className="mt-3 space-y-2">
+                  {pastSessions.map((session) => {
+                    const isExpanded = expandedSession === session._id;
+                    const durationMin = session.finishedAt
+                      ? Math.round(
+                          (+new Date(session.finishedAt) -
+                            +new Date(session.startedAt)) /
+                            60000,
+                        )
+                      : null;
+
+                    const completedSets = session.sets.filter(
+                      (s) => s.completed,
+                    );
+                    const hasSubstitutions = completedSets.some(
+                      (s) => s.substitutedFor,
+                    );
+
+                    // Group by exerciseName (which may be the substitute name)
+                    const exerciseGroups = new Map<
+                      string,
+                      typeof session.sets
+                    >();
+                    for (const s of completedSets) {
+                      if (!exerciseGroups.has(s.exerciseName))
+                        exerciseGroups.set(s.exerciseName, []);
+                      exerciseGroups.get(s.exerciseName)!.push(s);
+                    }
+
+                    const exerciseSummary = Array.from(
+                      exerciseGroups.keys(),
+                    ).join(", ");
+
+                    return (
+                      <div
+                        key={session._id}
+                        className="overflow-hidden rounded-2xl border border-white/40 bg-white/80"
+                      >
+                        <button
+                          className="w-full p-3 text-left"
+                          onClick={() =>
+                            setExpandedSession(
+                              isExpanded ? null : (session._id ?? null),
+                            )
+                          }
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0 flex-1">
+                              <p className="font-semibold">
+                                {session.trainingDay || "General"}
+                              </p>
+                              <p className="text-xs text-slate-500">
+                                {new Date(
+                                  session.finishedAt || session.startedAt,
+                                ).toLocaleDateString(undefined, {
+                                  weekday: "short",
+                                  year: "numeric",
+                                  month: "short",
+                                  day: "numeric",
+                                })}
+                                {durationMin ? ` · ${durationMin} min` : ""}
+                              </p>
+                              <p className="mt-0.5 truncate text-xs text-slate-500">
+                                {exerciseSummary}
+                              </p>
+                            </div>
+                            <div className="flex shrink-0 flex-col items-end gap-1">
+                              <span className="badge bg-emerald-100 text-emerald-800">
+                                {completedSets.length} sets
+                              </span>
+                              {hasSubstitutions ? (
+                                <span className="badge bg-amber-100 text-amber-800">
+                                  sub
+                                </span>
+                              ) : null}
+                              <span className="text-[10px] text-slate-400">
+                                {isExpanded ? "▲" : "▼"}
+                              </span>
+                            </div>
+                          </div>
+                        </button>
+
+                        {isExpanded ? (
+                          <div className="border-t border-slate-100 px-3 pb-3 pt-2 space-y-3">
+                            {Array.from(exerciseGroups.entries()).map(
+                              ([exName, exSets]) => {
+                                const subFor = exSets[0]?.substitutedFor;
+                                const sorted = [...exSets].sort(
+                                  (a, b) => a.setNumber - b.setNumber,
+                                );
+                                return (
+                                  <div key={exName}>
+                                    <p className="text-xs font-semibold">
+                                      {exName}
+                                      {subFor ? (
+                                        <span className="ml-1 font-normal text-amber-600">
+                                          (sub for {subFor})
+                                        </span>
+                                      ) : null}
+                                    </p>
+                                    <div className="mt-1 grid grid-cols-4 gap-x-2 gap-y-0.5 text-[11px] text-slate-500">
+                                      <span className="font-semibold">Set</span>
+                                      <span className="font-semibold">kg</span>
+                                      <span className="font-semibold">
+                                        Reps
+                                      </span>
+                                      <span className="font-semibold">RPE</span>
+                                      {sorted.map((s) => (
+                                        <React.Fragment key={s.setNumber}>
+                                          <span>
+                                            {s.setNumber}
+                                            {s.isDropSet ? " ↓" : ""}
+                                          </span>
+                                          <span>{s.weight}</span>
+                                          <span>{s.reps}</span>
+                                          <span>{s.rpe}</span>
+                                        </React.Fragment>
+                                      ))}
+                                    </div>
+                                  </div>
+                                );
+                              },
+                            )}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </section>
         ) : (
           <section className="grid gap-4 xl:grid-cols-[1.1fr_1fr]">
             <div className="space-y-4">
@@ -1360,11 +1628,76 @@ export default function HomePage() {
                 <div className="glass rounded-3xl p-4 sm:p-6">
                   <h3 className="text-lg font-bold">
                     Record: {selectedExercise}
+                    {substitutions[selectedExercise] ? (
+                      <span className="ml-2 text-sm font-normal text-amber-600">
+                        → {substitutions[selectedExercise]}
+                      </span>
+                    ) : null}
                   </h3>
                   <p className="text-sm text-slate-700">
                     You can log this exercise in any order. Recommendations use
                     your past 3 workouts.
                   </p>
+
+                  {/* Substitution UI */}
+                  {subEditingFor === selectedExercise ? (
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <input
+                        className="field flex-1 text-sm"
+                        placeholder="Substitute exercise name"
+                        value={subInputDraft[selectedExercise] ?? ""}
+                        onChange={(e) =>
+                          setSubInputDraft((prev) => ({
+                            ...prev,
+                            [selectedExercise]: e.target.value,
+                          }))
+                        }
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter")
+                            confirmSubstitution(selectedExercise);
+                          if (e.key === "Escape") setSubEditingFor(null);
+                        }}
+                        autoFocus
+                      />
+                      <button
+                        className="rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white"
+                        onClick={() => confirmSubstitution(selectedExercise)}
+                      >
+                        Confirm
+                      </button>
+                      <button
+                        className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold"
+                        onClick={() => setSubEditingFor(null)}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : substitutions[selectedExercise] ? (
+                    <div className="mt-2 flex items-center gap-2 text-xs">
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-800">
+                        Logging as: {substitutions[selectedExercise]}
+                      </span>
+                      <button
+                        className="text-slate-500 underline"
+                        onClick={() => clearSubstitution(selectedExercise)}
+                      >
+                        Remove substitution
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      className="mt-1 text-xs text-slate-500 underline"
+                      onClick={() => {
+                        setSubInputDraft((prev) => ({
+                          ...prev,
+                          [selectedExercise]: "",
+                        }));
+                        setSubEditingFor(selectedExercise);
+                      }}
+                    >
+                      Exercise not available? Substitute it
+                    </button>
+                  )}
 
                   <div className="mt-3 flex flex-wrap gap-2">
                     <button
@@ -1396,9 +1729,11 @@ export default function HomePage() {
                         const recommendation = history?.recommendations.find(
                           (r) => r.setNumber === setNumber,
                         );
+                        const resolvedExName =
+                          substitutions[selectedExercise] ?? selectedExercise;
                         const matchedSet = draftSets.find(
                           (set) =>
-                            set.exerciseName === selectedExercise &&
+                            set.exerciseName === resolvedExName &&
                             set.setNumber === setNumber,
                         );
 
@@ -1667,7 +2002,11 @@ export default function HomePage() {
                     </div>
                   </div>
 
-                  <div className="mt-4 h-72 w-full rounded-2xl border border-white/50 bg-white/80 p-2">
+                  {/* Chart 1: Strength trend */}
+                  <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Strength Trend
+                  </p>
+                  <div className="mt-1 h-64 w-full rounded-2xl border border-white/50 bg-white/80 p-2">
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={history.analysis.points}>
                         <CartesianGrid strokeDasharray="3 3" />
@@ -1692,7 +2031,7 @@ export default function HomePage() {
                           dataKey="avgWeight"
                           stroke="#0f766e"
                           strokeWidth={2}
-                          name="Avg Weight"
+                          name="Avg Weight (kg)"
                         />
                         <Line
                           yAxisId="right"
@@ -1708,11 +2047,155 @@ export default function HomePage() {
                           dataKey="estimated1RM"
                           stroke="#1d4ed8"
                           strokeWidth={2}
-                          name="Est. 1RM"
+                          name="Est. 1RM (kg)"
                         />
                       </LineChart>
                     </ResponsiveContainer>
                   </div>
+
+                  {/* Chart 2: Session volume (sets × reps × weight) */}
+                  <p className="mt-5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Session Volume
+                  </p>
+                  <p className="text-[11px] text-slate-500">
+                    Total kg moved per session — primary hypertrophy driver
+                  </p>
+                  <div className="mt-1 h-56 w-full rounded-2xl border border-white/50 bg-white/80 p-2">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={history.analysis.points}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis
+                          dataKey="date"
+                          tickFormatter={(value) =>
+                            new Date(value).toLocaleDateString()
+                          }
+                          minTickGap={20}
+                        />
+                        <YAxis />
+                        <Tooltip
+                          labelFormatter={(value) =>
+                            new Date(String(value)).toLocaleString()
+                          }
+                          formatter={(value: unknown) => [
+                            `${value} kg`,
+                            "Volume",
+                          ]}
+                        />
+                        <Bar
+                          dataKey="totalVolume"
+                          name="Volume (kg)"
+                          fill="#6366f1"
+                          radius={[4, 4, 0, 0]}
+                        />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+
+                  {/* Chart 3: Hypertrophy quality score */}
+                  <p className="mt-5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Hypertrophy Quality Score
+                  </p>
+                  <p className="text-[11px] text-slate-500">
+                    Volume × rep quality × effort proximity — higher is better
+                  </p>
+                  <div className="mt-1 h-56 w-full rounded-2xl border border-white/50 bg-white/80 p-2">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={history.analysis.points}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis
+                          dataKey="date"
+                          tickFormatter={(value) =>
+                            new Date(value).toLocaleDateString()
+                          }
+                          minTickGap={20}
+                        />
+                        <YAxis />
+                        <Tooltip
+                          labelFormatter={(value) =>
+                            new Date(String(value)).toLocaleString()
+                          }
+                        />
+                        <Legend />
+                        <Line
+                          type="monotone"
+                          dataKey="hypertrophyScore"
+                          stroke="#ec4899"
+                          strokeWidth={2}
+                          dot={{ r: 4 }}
+                          name="Hypertrophy Score"
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+
+                  {/* Chart 4: Last session set breakdown */}
+                  {lastSessionBreakdown.length > 0 ? (
+                    <>
+                      <p className="mt-5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Last Session — Set Breakdown
+                      </p>
+                      <p className="text-[11px] text-slate-500">
+                        Weight and reps per working set in your most recent
+                        session
+                      </p>
+                      <div className="mt-1 h-56 w-full rounded-2xl border border-white/50 bg-white/80 p-2">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={lastSessionBreakdown}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey="set" />
+                            <YAxis
+                              yAxisId="left"
+                              label={{
+                                value: "kg",
+                                angle: -90,
+                                position: "insideLeft",
+                                offset: 10,
+                              }}
+                            />
+                            <YAxis
+                              yAxisId="right"
+                              orientation="right"
+                              label={{
+                                value: "reps",
+                                angle: 90,
+                                position: "insideRight",
+                                offset: 10,
+                              }}
+                            />
+                            <Tooltip
+                              formatter={(value: unknown, name: unknown) => [
+                                name === "weight"
+                                  ? `${value} kg`
+                                  : name === "reps"
+                                    ? `${value} reps`
+                                    : `RPE ${value}`,
+                                name === "weight"
+                                  ? "Weight"
+                                  : name === "reps"
+                                    ? "Reps"
+                                    : "RPE",
+                              ]}
+                            />
+                            <Legend />
+                            <Bar
+                              yAxisId="left"
+                              dataKey="weight"
+                              name="Weight (kg)"
+                              fill="#0f766e"
+                              radius={[4, 4, 0, 0]}
+                            />
+                            <Bar
+                              yAxisId="right"
+                              dataKey="reps"
+                              name="Reps"
+                              fill="#f59e0b"
+                              radius={[4, 4, 0, 0]}
+                            />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </>
+                  ) : null}
                 </>
               ) : (
                 <p className="mt-3 text-sm text-slate-700">

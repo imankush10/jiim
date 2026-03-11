@@ -7,6 +7,7 @@ const finishSchema = z.object({
     .array(
       z.object({
         exerciseName: z.string().min(1),
+        substitutedFor: z.string().optional(),
         setNumber: z.number().int().min(1).max(50),
         reps: z.number().int().min(0).max(100),
         weight: z.number().min(0).max(1000),

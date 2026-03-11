@@ -18,6 +18,8 @@ export type WorkoutProgram = {
 
 export type WorkoutSet = {
   exerciseName: string;
+  /** Original planned exercise name, set when this set was logged as a substitution. */
+  substitutedFor?: string;
   setNumber: number;
   reps: number;
   weight: number;
