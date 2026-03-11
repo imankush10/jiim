@@ -132,43 +132,25 @@ export async function getWorkoutById(workoutId: string) {
   return row ? toStringId(row) : null;
 }
 
-export async function addWorkoutSet(workoutId: string, setData: WorkoutSet) {
+export async function finishWorkout(workoutId: string, sets?: WorkoutSet[]) {
   const db = await getDb();
+  const updatePayload: {
+    status: "finished";
+    finishedAt: string;
+    sets?: WorkoutSet[];
+  } = {
+    status: "finished",
+    finishedAt: new Date().toISOString(),
+  };
 
-  const workout = await getWorkoutById(workoutId);
-  if (!workout || workout.status !== "active") return null;
+  if (sets) {
+    updatePayload.sets = sets;
+  }
 
-  const updatedSets = workout.sets
-    .filter(
-      (set) =>
-        !(
-          set.exerciseName === setData.exerciseName &&
-          set.setNumber === setData.setNumber
-        ),
-    )
-    .concat(setData);
-
-  await db.collection<SessionDocument>("workouts").updateOne(
-    { _id: new ObjectId(workoutId), status: "active" },
-    {
-      $set: {
-        sets: updatedSets,
-      },
-    },
-  );
-
-  return getWorkoutById(workoutId);
-}
-
-export async function finishWorkout(workoutId: string) {
-  const db = await getDb();
   await db.collection("workouts").updateOne(
     { _id: new ObjectId(workoutId) },
     {
-      $set: {
-        status: "finished",
-        finishedAt: new Date().toISOString(),
-      },
+      $set: updatePayload,
     },
   );
 

@@ -61,6 +61,5 @@ npm run dev
 - `GET /api/programs/:id` - fetch single program
 - `POST /api/workouts/start` - start/resume workout
 - `GET /api/workouts/active?programId=...` - active workout
-- `PATCH /api/workouts/:id/set` - log or update one set
-- `POST /api/workouts/:id/finish` - finish workout
+- `POST /api/workouts/:id/finish` - finish workout and submit final local draft sets
 - `GET /api/history/exercise?name=...&sets=...` - history, analytics, recommendations

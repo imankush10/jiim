@@ -14,6 +14,7 @@ import {
 import {
   ExerciseAnalysis,
   SetRecommendation,
+  WorkoutSet,
   WorkoutProgram,
   WorkoutSession,
 } from "@/lib/types";
@@ -100,6 +101,7 @@ export default function HomePage() {
   >({});
   const [extraSets, setExtraSets] = useState<Record<string, number>>({});
   const [ignoredActiveScopes, setIgnoredActiveScopes] = useState<string[]>([]);
+  const [draftSets, setDraftSets] = useState<WorkoutSet[]>([]);
 
   const selectedProgram = useMemo(
     () => programs.find((program) => program._id === selectedProgramId) || null,
@@ -230,6 +232,36 @@ export default function HomePage() {
 
     setExtraSets((prev) => ({ ...prev, ...computed }));
   }, [activeWorkout, selectedDay, exercisesForSelectedDay]);
+
+  useEffect(() => {
+    if (!activeWorkout?._id) {
+      setDraftSets([]);
+      return;
+    }
+
+    try {
+      const raw = window.localStorage.getItem(
+        getDraftStorageKey(activeWorkout._id),
+      );
+      if (!raw) {
+        setDraftSets(activeWorkout.sets || []);
+        return;
+      }
+
+      const parsed = JSON.parse(raw) as WorkoutSet[];
+      setDraftSets(Array.isArray(parsed) ? parsed : activeWorkout.sets || []);
+    } catch {
+      setDraftSets(activeWorkout.sets || []);
+    }
+  }, [activeWorkout]);
+
+  useEffect(() => {
+    if (!activeWorkout?._id) return;
+    window.localStorage.setItem(
+      getDraftStorageKey(activeWorkout._id),
+      JSON.stringify(draftSets),
+    );
+  }, [activeWorkout, draftSets]);
 
   async function fetchHistory(exerciseName: string, sets: number) {
     const response = await fetch(
@@ -441,12 +473,18 @@ export default function HomePage() {
         `/api/workouts/${activeWorkout._id}/finish`,
         {
           method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sets: draftSets }),
         },
       );
       if (!response.ok) throw new Error("Failed to finish workout");
 
       const finished = (await response.json()) as WorkoutSession;
+      window.localStorage.removeItem(getDraftStorageKey(activeWorkout._id));
       setActiveWorkout(null);
+      setDraftSets([]);
+      setSetInputs({});
+      setExtraSets({});
 
       if (selectedExercise) {
         const config = exercisesForSelectedDay.find(
@@ -475,7 +513,12 @@ export default function HomePage() {
       prev.includes(scopeKey) ? prev : [...prev, scopeKey],
     );
 
+    if (activeWorkout?._id) {
+      window.localStorage.removeItem(getDraftStorageKey(activeWorkout._id));
+    }
+
     setActiveWorkout(null);
+    setDraftSets([]);
     setSelectedExercise("");
     setSetInputs({});
     setExtraSets({});
@@ -496,6 +539,10 @@ export default function HomePage() {
 
   function getWorkoutScopeKey(programId: string, trainingDay: string) {
     return `${programId}__${trainingDay}`;
+  }
+
+  function getDraftStorageKey(workoutId: string) {
+    return `jiim_draft_sets_${workoutId}`;
   }
 
   function plannedSetCount(exerciseName: string) {
@@ -600,8 +647,6 @@ export default function HomePage() {
     exerciseName: string,
     setNumber: number,
   ) {
-    if (!activeWorkout?._id) return;
-
     const key = getSetInputKey(trainingDay, exerciseName, setNumber);
     const values = setInputs[key] || {
       reps: 10,
@@ -610,32 +655,29 @@ export default function HomePage() {
       isDropSet: false,
     };
 
-    const response = await fetch(`/api/workouts/${activeWorkout._id}/set`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        exerciseName,
-        setNumber,
-        reps: Number(values.reps),
-        weight: Number(values.weight),
-        rpe: Number(values.rpe),
-        isDropSet: values.isDropSet,
-        completed: true,
-      }),
+    const nextSet: WorkoutSet = {
+      exerciseName,
+      setNumber,
+      reps: Number(values.reps),
+      weight: Number(values.weight),
+      rpe: Number(values.rpe),
+      isDropSet: values.isDropSet,
+      completed: true,
+      timestamp: new Date().toISOString(),
+    };
+
+    setDraftSets((prev) => {
+      const filtered = prev.filter(
+        (set) =>
+          !(set.exerciseName === exerciseName && set.setNumber === setNumber),
+      );
+      return filtered.concat(nextSet);
     });
-
-    if (!response.ok) {
-      setError("Could not save set. Please retry.");
-      return;
-    }
-
-    const workout = (await response.json()) as WorkoutSession;
-    setActiveWorkout(workout);
   }
 
   function completedCount(exerciseName: string) {
     return (
-      activeWorkout?.sets.filter(
+      draftSets.filter(
         (set) => set.exerciseName === exerciseName && set.completed,
       ).length || 0
     );
@@ -1188,18 +1230,27 @@ export default function HomePage() {
                         const recommendation = history?.recommendations.find(
                           (r) => r.setNumber === setNumber,
                         );
-                        const input = setInputs[key] || {
-                          reps: recommendation?.recommendedReps || 10,
-                          weight: recommendation?.recommendedWeight || 20,
-                          rpe: recommendation?.recommendedRpe || 7,
-                          isDropSet: false,
-                        };
-
-                        const matchedSet = activeWorkout.sets.find(
+                        const matchedSet = draftSets.find(
                           (set) =>
                             set.exerciseName === selectedExercise &&
                             set.setNumber === setNumber,
                         );
+
+                        const input = setInputs[key] || {
+                          reps:
+                            matchedSet?.reps ??
+                            recommendation?.recommendedReps ??
+                            10,
+                          weight:
+                            matchedSet?.weight ??
+                            recommendation?.recommendedWeight ??
+                            20,
+                          rpe:
+                            matchedSet?.rpe ??
+                            recommendation?.recommendedRpe ??
+                            7,
+                          isDropSet: matchedSet?.isDropSet ?? false,
+                        };
 
                         const completed = Boolean(matchedSet?.completed);
                         const isDropSet =
@@ -1328,7 +1379,7 @@ export default function HomePage() {
                                   )
                                 }
                               >
-                                Save Set
+                                Save Set (Local)
                               </button>
                               <button
                                 className="rounded-lg bg-white px-3 py-2 text-xs font-semibold"
