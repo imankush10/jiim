@@ -95,7 +95,10 @@ export async function startWorkout(
   };
 }
 
-export async function getActiveWorkout(programId?: string, trainingDay?: string) {
+export async function getActiveWorkout(
+  programId?: string,
+  trainingDay?: string,
+) {
   const db = await getDb();
   const filter: Pick<SessionDocument, "status"> &
     Partial<Pick<SessionDocument, "programId" | "trainingDay">> = {

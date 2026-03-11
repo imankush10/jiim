@@ -59,10 +59,7 @@ const starterForm: ProgramForm = {
   ],
 };
 
-function getExerciseDay(exercise: {
-  day?: string;
-  notes?: string;
-}) {
+function getExerciseDay(exercise: { day?: string; notes?: string }) {
   if (exercise.day?.trim()) return exercise.day.trim();
 
   const notePrefix = exercise.notes?.split("|")[0]?.trim();
@@ -83,6 +80,7 @@ export default function HomePage() {
   const [activeTab, setActiveTab] = useState<"maker" | "workout">("maker");
   const [programs, setPrograms] = useState<WorkoutProgram[]>([]);
   const [programForm, setProgramForm] = useState<ProgramForm>(starterForm);
+  const [dayNames, setDayNames] = useState<string[]>(["Day 1"]);
   const [editingProgramId, setEditingProgramId] = useState<string | null>(null);
   const [selectedProgramId, setSelectedProgramId] = useState<string>("");
   const [selectedDay, setSelectedDay] = useState<string>("General");
@@ -95,7 +93,10 @@ export default function HomePage() {
   const [error, setError] = useState<string>("");
 
   const [setInputs, setSetInputs] = useState<
-    Record<string, { reps: number; weight: number; rpe: number; isDropSet: boolean }>
+    Record<
+      string,
+      { reps: number; weight: number; rpe: number; isDropSet: boolean }
+    >
   >({});
   const [extraSets, setExtraSets] = useState<Record<string, number>>({});
 
@@ -104,11 +105,28 @@ export default function HomePage() {
     [programs, selectedProgramId],
   );
 
+  const makerDays = useMemo(() => {
+    const fromForm = Array.from(
+      new Set(
+        programForm.exercises.map((exercise) => exercise.day).filter(Boolean),
+      ),
+    );
+    const merged = [...dayNames];
+
+    for (const day of fromForm) {
+      if (!merged.includes(day)) merged.push(day);
+    }
+
+    return merged;
+  }, [dayNames, programForm.exercises]);
+
   const availableDays = useMemo(() => {
     if (!selectedProgram) return [];
 
     return Array.from(
-      new Set(selectedProgram.exercises.map((exercise) => getExerciseDay(exercise))),
+      new Set(
+        selectedProgram.exercises.map((exercise) => getExerciseDay(exercise)),
+      ),
     );
   }, [selectedProgram]);
 
@@ -145,7 +163,9 @@ export default function HomePage() {
       return;
     }
 
-    setSelectedDay((prev) => (availableDays.includes(prev) ? prev : availableDays[0]));
+    setSelectedDay((prev) =>
+      availableDays.includes(prev) ? prev : availableDays[0],
+    );
   }, [availableDays]);
 
   useEffect(() => {
@@ -172,7 +192,8 @@ export default function HomePage() {
   }, [selectedExercise, exercisesForSelectedDay]);
 
   useEffect(() => {
-    if (!activeWorkout || !selectedDay || !exercisesForSelectedDay.length) return;
+    if (!activeWorkout || !selectedDay || !exercisesForSelectedDay.length)
+      return;
 
     const computed: Record<string, number> = {};
 
@@ -220,7 +241,9 @@ export default function HomePage() {
       };
 
       const response = await fetch(
-        editingProgramId ? `/api/programs/${editingProgramId}` : "/api/programs",
+        editingProgramId
+          ? `/api/programs/${editingProgramId}`
+          : "/api/programs",
         {
           method: editingProgramId ? "PATCH" : "POST",
           headers: { "Content-Type": "application/json" },
@@ -232,6 +255,7 @@ export default function HomePage() {
 
       await refreshPrograms();
       setProgramForm(starterForm);
+      setDayNames(["Day 1"]);
       setEditingProgramId(null);
       setActiveTab("workout");
     } catch (createError) {
@@ -242,26 +266,132 @@ export default function HomePage() {
   }
 
   function handleEditProgram(program: WorkoutProgram) {
+    const loadedExercises = program.exercises.map((exercise) => ({
+      name: exercise.name,
+      sets: exercise.sets,
+      minReps: exercise.minReps,
+      maxReps: exercise.maxReps,
+      day: getExerciseDay(exercise),
+      sessionType: getExerciseSessionType(exercise),
+      notes: exercise.notes || "",
+    }));
+
+    const loadedDays = Array.from(
+      new Set(loadedExercises.map((exercise) => exercise.day)),
+    );
+
     setEditingProgramId(program._id || null);
     setProgramForm({
       name: program.name,
       description: program.description || "",
-      exercises: program.exercises.map((exercise) => ({
-        name: exercise.name,
-        sets: exercise.sets,
-        minReps: exercise.minReps,
-        maxReps: exercise.maxReps,
-        day: getExerciseDay(exercise),
-        sessionType: getExerciseSessionType(exercise),
-        notes: exercise.notes || "",
-      })),
+      exercises: loadedExercises,
     });
+    setDayNames(loadedDays.length ? loadedDays : ["Day 1"]);
     setActiveTab("maker");
   }
 
   function cancelEditProgram() {
     setEditingProgramId(null);
     setProgramForm(starterForm);
+    setDayNames(["Day 1"]);
+  }
+
+  function updateDayCount(count: number) {
+    const safeCount = Math.max(1, Math.min(7, Math.floor(count || 1)));
+    setDayNames((prev) => {
+      const next = prev.slice(0, safeCount);
+      while (next.length < safeCount) {
+        next.push(`Day ${next.length + 1}`);
+      }
+
+      const validDays = new Set(next);
+      const fallbackDay = next[next.length - 1] || "Day 1";
+      setProgramForm((formPrev) => ({
+        ...formPrev,
+        exercises: formPrev.exercises.map((exercise) =>
+          validDays.has(exercise.day)
+            ? exercise
+            : { ...exercise, day: fallbackDay },
+        ),
+      }));
+
+      return next;
+    });
+  }
+
+  function renameDay(oldDay: string, nextDay: string) {
+    const trimmed = nextDay.trim();
+    if (!trimmed) return;
+
+    setDayNames((prev) => prev.map((day) => (day === oldDay ? trimmed : day)));
+    setProgramForm((prev) => ({
+      ...prev,
+      exercises: prev.exercises.map((exercise) =>
+        exercise.day === oldDay ? { ...exercise, day: trimmed } : exercise,
+      ),
+    }));
+  }
+
+  function getDayExerciseIndices(
+    exercises: ProgramFormExercise[],
+    day: string,
+  ) {
+    return exercises.reduce<number[]>((acc, exercise, index) => {
+      if (exercise.day === day) acc.push(index);
+      return acc;
+    }, []);
+  }
+
+  function addExerciseForDay(
+    day: string,
+    localIndex?: number,
+    place: "above" | "below" = "below",
+  ) {
+    setProgramForm((prev) => {
+      const indices = getDayExerciseIndices(prev.exercises, day);
+      let insertAt = prev.exercises.length;
+
+      if (typeof localIndex === "number" && indices[localIndex] !== undefined) {
+        const absolute = indices[localIndex];
+        insertAt = place === "above" ? absolute : absolute + 1;
+      } else if (indices.length > 0) {
+        insertAt = indices[indices.length - 1] + 1;
+      }
+
+      const next = [...prev.exercises];
+      next.splice(insertAt, 0, { ...emptyExercise, day });
+      return { ...prev, exercises: next };
+    });
+  }
+
+  function moveExerciseInDay(
+    day: string,
+    localIndex: number,
+    direction: "up" | "down",
+  ) {
+    setProgramForm((prev) => {
+      const indices = getDayExerciseIndices(prev.exercises, day);
+      const target = indices[localIndex];
+      const swapWith =
+        direction === "up" ? indices[localIndex - 1] : indices[localIndex + 1];
+
+      if (target === undefined || swapWith === undefined) return prev;
+
+      const next = [...prev.exercises];
+      [next[target], next[swapWith]] = [next[swapWith], next[target]];
+      return { ...prev, exercises: next };
+    });
+  }
+
+  function removeExerciseInDay(day: string, localIndex: number) {
+    setProgramForm((prev) => {
+      const indices = getDayExerciseIndices(prev.exercises, day);
+      const target = indices[localIndex];
+      if (target === undefined) return prev;
+
+      const next = prev.exercises.filter((_, idx) => idx !== target);
+      return { ...prev, exercises: next };
+    });
   }
 
   async function handleStartWorkout() {
@@ -531,7 +661,9 @@ export default function HomePage() {
               onSubmit={handleProgramCreate}
             >
               <h2 className="text-xl font-bold">
-                {editingProgramId ? "Edit Workout Program" : "Create Workout Program"}
+                {editingProgramId
+                  ? "Edit Workout Program"
+                  : "Create Workout Program"}
               </h2>
               <div className="mt-4 grid gap-3">
                 <input
@@ -559,145 +691,244 @@ export default function HomePage() {
                 />
               </div>
 
-              <div className="mt-5 space-y-3">
-                {programForm.exercises.map((exercise, idx) => (
-                  <div
-                    key={`${exercise.name}-${idx}`}
-                    className="rounded-2xl border border-white/50 bg-white/70 p-3"
-                  >
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      <input
-                        className="field"
-                        placeholder="Exercise"
-                        value={exercise.name}
-                        onChange={(e) => {
-                          const value = e.target.value;
-                          setProgramForm((prev) => ({
-                            ...prev,
-                            exercises: prev.exercises.map((row, rowIdx) =>
-                              rowIdx === idx ? { ...row, name: value } : row,
-                            ),
-                          }));
-                        }}
-                        required
-                      />
-                      <input
-                        className="field"
-                        type="number"
-                        min={1}
-                        max={10}
-                        placeholder="Sets"
-                        value={exercise.sets}
-                        onChange={(e) => {
-                          const value = Number(e.target.value);
-                          setProgramForm((prev) => ({
-                            ...prev,
-                            exercises: prev.exercises.map((row, rowIdx) =>
-                              rowIdx === idx ? { ...row, sets: value } : row,
-                            ),
-                          }));
-                        }}
-                        required
-                      />
-                      <input
-                        className="field"
-                        type="number"
-                        min={1}
-                        max={30}
-                        placeholder="Min reps"
-                        value={exercise.minReps}
-                        onChange={(e) => {
-                          const value = Number(e.target.value);
-                          setProgramForm((prev) => ({
-                            ...prev,
-                            exercises: prev.exercises.map((row, rowIdx) =>
-                              rowIdx === idx ? { ...row, minReps: value } : row,
-                            ),
-                          }));
-                        }}
-                        required
-                      />
-                      <input
-                        className="field"
-                        type="number"
-                        min={1}
-                        max={40}
-                        placeholder="Max reps"
-                        value={exercise.maxReps}
-                        onChange={(e) => {
-                          const value = Number(e.target.value);
-                          setProgramForm((prev) => ({
-                            ...prev,
-                            exercises: prev.exercises.map((row, rowIdx) =>
-                              rowIdx === idx ? { ...row, maxReps: value } : row,
-                            ),
-                          }));
-                        }}
-                        required
-                      />
-                      <input
-                        className="field"
-                        placeholder="Day (e.g. Monday or Day 1)"
-                        value={exercise.day}
-                        onChange={(e) => {
-                          const value = e.target.value;
-                          setProgramForm((prev) => ({
-                            ...prev,
-                            exercises: prev.exercises.map((row, rowIdx) =>
-                              rowIdx === idx ? { ...row, day: value } : row,
-                            ),
-                          }));
-                        }}
-                        required
-                      />
-                      <input
-                        className="field"
-                        placeholder="Session type (optional)"
-                        value={exercise.sessionType}
-                        onChange={(e) => {
-                          const value = e.target.value;
-                          setProgramForm((prev) => ({
-                            ...prev,
-                            exercises: prev.exercises.map((row, rowIdx) =>
-                              rowIdx === idx
-                                ? { ...row, sessionType: value }
-                                : row,
-                            ),
-                          }));
-                        }}
-                      />
-                    </div>
-                    <textarea
-                      className="field mt-2 min-h-16"
-                      placeholder="Notes"
-                      value={exercise.notes}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        setProgramForm((prev) => ({
-                          ...prev,
-                          exercises: prev.exercises.map((row, rowIdx) =>
-                            rowIdx === idx ? { ...row, notes: value } : row,
+              <div className="mt-5 rounded-2xl border border-white/50 bg-white/70 p-3">
+                <label className="text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  How many training days?
+                </label>
+                <input
+                  className="field mt-2 max-w-[120px]"
+                  type="number"
+                  min={1}
+                  max={7}
+                  value={dayNames.length}
+                  onChange={(e) => updateDayCount(Number(e.target.value))}
+                />
+              </div>
+
+              <div className="mt-5 space-y-4">
+                {makerDays.map((day) => {
+                  const dayIndices = getDayExerciseIndices(
+                    programForm.exercises,
+                    day,
+                  );
+                  const dayExercises = dayIndices.map((index) => ({
+                    exercise: programForm.exercises[index],
+                    absoluteIndex: index,
+                  }));
+
+                  return (
+                    <div
+                      key={day}
+                      className="rounded-2xl border border-white/50 bg-white/70 p-3"
+                    >
+                      <div className="mb-3 flex flex-wrap items-center gap-2">
+                        <input
+                          className="field max-w-[220px]"
+                          value={day}
+                          onChange={(e) => renameDay(day, e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold"
+                          onClick={() => addExerciseForDay(day)}
+                        >
+                          Add Exercise To This Day
+                        </button>
+                      </div>
+
+                      {dayExercises.length === 0 ? (
+                        <p className="text-sm text-slate-600">
+                          No exercises yet for this day.
+                        </p>
+                      ) : null}
+
+                      <div className="space-y-3">
+                        {dayExercises.map(
+                          ({ exercise, absoluteIndex }, dayIdx) => (
+                            <div
+                              key={`maker-${day}-${absoluteIndex}`}
+                              className="rounded-2xl border border-white/50 bg-white p-3"
+                            >
+                              <div className="mb-2 flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  className="rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold"
+                                  onClick={() =>
+                                    moveExerciseInDay(day, dayIdx, "up")
+                                  }
+                                  disabled={dayIdx === 0}
+                                >
+                                  Move Up
+                                </button>
+                                <button
+                                  type="button"
+                                  className="rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold"
+                                  onClick={() =>
+                                    moveExerciseInDay(day, dayIdx, "down")
+                                  }
+                                  disabled={dayIdx === dayExercises.length - 1}
+                                >
+                                  Move Down
+                                </button>
+                                <button
+                                  type="button"
+                                  className="rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold"
+                                  onClick={() =>
+                                    addExerciseForDay(day, dayIdx, "above")
+                                  }
+                                >
+                                  Add Above
+                                </button>
+                                <button
+                                  type="button"
+                                  className="rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold"
+                                  onClick={() =>
+                                    addExerciseForDay(day, dayIdx, "below")
+                                  }
+                                >
+                                  Add Below
+                                </button>
+                                <button
+                                  type="button"
+                                  className="rounded-md bg-red-100 px-2 py-1 text-xs font-semibold text-red-700"
+                                  onClick={() =>
+                                    removeExerciseInDay(day, dayIdx)
+                                  }
+                                >
+                                  Remove
+                                </button>
+                              </div>
+
+                              <div className="grid gap-2 sm:grid-cols-2">
+                                <input
+                                  className="field"
+                                  placeholder="Exercise"
+                                  value={exercise.name}
+                                  onChange={(e) => {
+                                    const value = e.target.value;
+                                    setProgramForm((prev) => ({
+                                      ...prev,
+                                      exercises: prev.exercises.map(
+                                        (row, rowIdx) =>
+                                          rowIdx === absoluteIndex
+                                            ? { ...row, name: value }
+                                            : row,
+                                      ),
+                                    }));
+                                  }}
+                                  required
+                                />
+                                <input
+                                  className="field"
+                                  type="number"
+                                  min={1}
+                                  max={10}
+                                  placeholder="Sets"
+                                  value={exercise.sets}
+                                  onChange={(e) => {
+                                    const value = Number(e.target.value);
+                                    setProgramForm((prev) => ({
+                                      ...prev,
+                                      exercises: prev.exercises.map(
+                                        (row, rowIdx) =>
+                                          rowIdx === absoluteIndex
+                                            ? { ...row, sets: value }
+                                            : row,
+                                      ),
+                                    }));
+                                  }}
+                                  required
+                                />
+                                <input
+                                  className="field"
+                                  type="number"
+                                  min={1}
+                                  max={30}
+                                  placeholder="Min reps"
+                                  value={exercise.minReps}
+                                  onChange={(e) => {
+                                    const value = Number(e.target.value);
+                                    setProgramForm((prev) => ({
+                                      ...prev,
+                                      exercises: prev.exercises.map(
+                                        (row, rowIdx) =>
+                                          rowIdx === absoluteIndex
+                                            ? { ...row, minReps: value }
+                                            : row,
+                                      ),
+                                    }));
+                                  }}
+                                  required
+                                />
+                                <input
+                                  className="field"
+                                  type="number"
+                                  min={1}
+                                  max={40}
+                                  placeholder="Max reps"
+                                  value={exercise.maxReps}
+                                  onChange={(e) => {
+                                    const value = Number(e.target.value);
+                                    setProgramForm((prev) => ({
+                                      ...prev,
+                                      exercises: prev.exercises.map(
+                                        (row, rowIdx) =>
+                                          rowIdx === absoluteIndex
+                                            ? { ...row, maxReps: value }
+                                            : row,
+                                      ),
+                                    }));
+                                  }}
+                                  required
+                                />
+                                <input
+                                  className="field"
+                                  placeholder="Session type (optional)"
+                                  value={exercise.sessionType}
+                                  onChange={(e) => {
+                                    const value = e.target.value;
+                                    setProgramForm((prev) => ({
+                                      ...prev,
+                                      exercises: prev.exercises.map(
+                                        (row, rowIdx) =>
+                                          rowIdx === absoluteIndex
+                                            ? { ...row, sessionType: value }
+                                            : row,
+                                      ),
+                                    }));
+                                  }}
+                                />
+                                <div className="flex items-center rounded-lg bg-slate-50 px-3 text-xs font-semibold text-slate-500">
+                                  {day}
+                                </div>
+                              </div>
+                              <textarea
+                                className="field mt-2 min-h-16"
+                                placeholder="Notes"
+                                value={exercise.notes}
+                                onChange={(e) => {
+                                  const value = e.target.value;
+                                  setProgramForm((prev) => ({
+                                    ...prev,
+                                    exercises: prev.exercises.map(
+                                      (row, rowIdx) =>
+                                        rowIdx === absoluteIndex
+                                          ? { ...row, notes: value }
+                                          : row,
+                                    ),
+                                  }));
+                                }}
+                              />
+                            </div>
                           ),
-                        }));
-                      }}
-                    />
-                  </div>
-                ))}
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
 
               <div className="mt-4 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  className="rounded-xl bg-white px-4 py-2 text-sm font-semibold"
-                  onClick={() =>
-                    setProgramForm((prev) => ({
-                      ...prev,
-                      exercises: [...prev.exercises, { ...emptyExercise }],
-                    }))
-                  }
-                >
-                  Add Exercise
-                </button>
                 <button
                   type="submit"
                   disabled={loading}
@@ -801,7 +1032,8 @@ export default function HomePage() {
 
                 {selectedDay ? (
                   <p className="mt-2 text-xs text-slate-600">
-                    Tracking day: <span className="font-semibold">{selectedDay}</span>
+                    Tracking day:{" "}
+                    <span className="font-semibold">{selectedDay}</span>
                   </p>
                 ) : null}
 
@@ -822,7 +1054,8 @@ export default function HomePage() {
                       >
                         <p className="font-semibold">{exercise.name}</p>
                         <p className="text-xs text-slate-600">
-                          {done}/{totalSets} sets completed {done >= totalSets ? "✓" : ""}
+                          {done}/{totalSets} sets completed{" "}
+                          {done >= totalSets ? "✓" : ""}
                         </p>
                       </button>
                     );
@@ -884,7 +1117,8 @@ export default function HomePage() {
                         );
 
                         const completed = Boolean(matchedSet?.completed);
-                        const isDropSet = input.isDropSet || Boolean(matchedSet?.isDropSet);
+                        const isDropSet =
+                          input.isDropSet || Boolean(matchedSet?.isDropSet);
 
                         return (
                           <div

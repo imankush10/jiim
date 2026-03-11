@@ -44,7 +44,10 @@ export async function PATCH(req: Request, { params }: Params) {
     const updated = await updateProgramById(id, payload);
 
     if (!updated) {
-      return NextResponse.json({ message: "Program not found" }, { status: 404 });
+      return NextResponse.json(
+        { message: "Program not found" },
+        { status: 404 },
+      );
     }
 
     return NextResponse.json(updated);
