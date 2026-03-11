@@ -22,6 +22,7 @@ export type WorkoutSet = {
   reps: number;
   weight: number;
   rpe: number;
+  isDropSet?: boolean;
   completed: boolean;
   timestamp: string;
 };

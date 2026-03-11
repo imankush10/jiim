@@ -69,10 +69,21 @@ function getExerciseDay(exercise: {
   return notePrefix || "General";
 }
 
+function getExerciseSessionType(exercise: {
+  sessionType?: string;
+  notes?: string;
+}) {
+  if (exercise.sessionType?.trim()) return exercise.sessionType.trim();
+
+  const parts = exercise.notes?.split("|").map((part) => part.trim()) || [];
+  return parts[1] || "";
+}
+
 export default function HomePage() {
   const [activeTab, setActiveTab] = useState<"maker" | "workout">("maker");
   const [programs, setPrograms] = useState<WorkoutProgram[]>([]);
   const [programForm, setProgramForm] = useState<ProgramForm>(starterForm);
+  const [editingProgramId, setEditingProgramId] = useState<string | null>(null);
   const [selectedProgramId, setSelectedProgramId] = useState<string>("");
   const [selectedDay, setSelectedDay] = useState<string>("General");
   const [activeWorkout, setActiveWorkout] = useState<WorkoutSession | null>(
@@ -84,8 +95,9 @@ export default function HomePage() {
   const [error, setError] = useState<string>("");
 
   const [setInputs, setSetInputs] = useState<
-    Record<string, { reps: number; weight: number; rpe: number }>
+    Record<string, { reps: number; weight: number; rpe: number; isDropSet: boolean }>
   >({});
+  const [extraSets, setExtraSets] = useState<Record<string, number>>({});
 
   const selectedProgram = useMemo(
     () => programs.find((program) => program._id === selectedProgramId) || null,
@@ -159,6 +171,26 @@ export default function HomePage() {
     void fetchHistory(selectedExercise, exerciseConfig.sets);
   }, [selectedExercise, exercisesForSelectedDay]);
 
+  useEffect(() => {
+    if (!activeWorkout || !selectedDay || !exercisesForSelectedDay.length) return;
+
+    const computed: Record<string, number> = {};
+
+    for (const exercise of exercisesForSelectedDay) {
+      const planned = exercise.sets;
+      const maxLogged = activeWorkout.sets
+        .filter((set) => set.exerciseName === exercise.name)
+        .reduce((max, set) => Math.max(max, set.setNumber), 0);
+
+      const extra = Math.max(0, maxLogged - planned);
+      if (extra > 0) {
+        computed[getExerciseKey(selectedDay, exercise.name)] = extra;
+      }
+    }
+
+    setExtraSets((prev) => ({ ...prev, ...computed }));
+  }, [activeWorkout, selectedDay, exercisesForSelectedDay]);
+
   async function fetchActiveWorkout(programId: string, trainingDay: string) {
     const response = await fetch(
       `/api/workouts/active?programId=${programId}&trainingDay=${encodeURIComponent(trainingDay)}`,
@@ -187,22 +219,49 @@ export default function HomePage() {
         exercises: programForm.exercises,
       };
 
-      const response = await fetch("/api/programs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      const response = await fetch(
+        editingProgramId ? `/api/programs/${editingProgramId}` : "/api/programs",
+        {
+          method: editingProgramId ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+      );
 
-      if (!response.ok) throw new Error("Failed to create program");
+      if (!response.ok) throw new Error("Failed to save program");
 
       await refreshPrograms();
       setProgramForm(starterForm);
+      setEditingProgramId(null);
       setActiveTab("workout");
     } catch (createError) {
       setError(String(createError));
     } finally {
       setLoading(false);
     }
+  }
+
+  function handleEditProgram(program: WorkoutProgram) {
+    setEditingProgramId(program._id || null);
+    setProgramForm({
+      name: program.name,
+      description: program.description || "",
+      exercises: program.exercises.map((exercise) => ({
+        name: exercise.name,
+        sets: exercise.sets,
+        minReps: exercise.minReps,
+        maxReps: exercise.maxReps,
+        day: getExerciseDay(exercise),
+        sessionType: getExerciseSessionType(exercise),
+        notes: exercise.notes || "",
+      })),
+    });
+    setActiveTab("maker");
+  }
+
+  function cancelEditProgram() {
+    setEditingProgramId(null);
+    setProgramForm(starterForm);
   }
 
   async function handleStartWorkout() {
@@ -272,6 +331,22 @@ export default function HomePage() {
     return `${trainingDay}__${exerciseName}__${setNumber}`;
   }
 
+  function getExerciseKey(trainingDay: string, exerciseName: string) {
+    return `${trainingDay}__${exerciseName}`;
+  }
+
+  function plannedSetCount(exerciseName: string) {
+    return (
+      exercisesForSelectedDay.find((exercise) => exercise.name === exerciseName)
+        ?.sets || 0
+    );
+  }
+
+  function renderedSetCount(exerciseName: string) {
+    const key = getExerciseKey(selectedDay, exerciseName);
+    return plannedSetCount(exerciseName) + (extraSets[key] || 0);
+  }
+
   function updateSetInput(
     trainingDay: string,
     exerciseName: string,
@@ -286,7 +361,26 @@ export default function HomePage() {
         reps: prev[key]?.reps ?? 10,
         weight: prev[key]?.weight ?? 20,
         rpe: prev[key]?.rpe ?? 7,
+        isDropSet: prev[key]?.isDropSet ?? false,
         [field]: value,
+      },
+    }));
+  }
+
+  function setDropFlag(
+    trainingDay: string,
+    exerciseName: string,
+    setNumber: number,
+    isDropSet: boolean,
+  ) {
+    const key = getSetInputKey(trainingDay, exerciseName, setNumber);
+    setSetInputs((prev) => ({
+      ...prev,
+      [key]: {
+        reps: prev[key]?.reps ?? 10,
+        weight: prev[key]?.weight ?? 20,
+        rpe: prev[key]?.rpe ?? 7,
+        isDropSet,
       },
     }));
   }
@@ -307,8 +401,35 @@ export default function HomePage() {
         reps: recommendation.recommendedReps,
         weight: recommendation.recommendedWeight,
         rpe: recommendation.recommendedRpe,
+        isDropSet: prev[key]?.isDropSet ?? false,
       },
     }));
+  }
+
+  function addSetRow(exerciseName: string, isDropSet: boolean) {
+    const current = renderedSetCount(exerciseName);
+    const nextSetNumber = current + 1;
+    const exerciseKey = getExerciseKey(selectedDay, exerciseName);
+    const setKey = getSetInputKey(selectedDay, exerciseName, nextSetNumber);
+
+    setExtraSets((prev) => ({
+      ...prev,
+      [exerciseKey]: (prev[exerciseKey] || 0) + 1,
+    }));
+
+    setSetInputs((prev) => {
+      if (prev[setKey]) return prev;
+
+      return {
+        ...prev,
+        [setKey]: {
+          reps: isDropSet ? 12 : 10,
+          weight: isDropSet ? 15 : 20,
+          rpe: isDropSet ? 8 : 7,
+          isDropSet,
+        },
+      };
+    });
   }
 
   async function saveSet(
@@ -319,7 +440,12 @@ export default function HomePage() {
     if (!activeWorkout?._id) return;
 
     const key = getSetInputKey(trainingDay, exerciseName, setNumber);
-    const values = setInputs[key] || { reps: 10, weight: 20, rpe: 7 };
+    const values = setInputs[key] || {
+      reps: 10,
+      weight: 20,
+      rpe: 7,
+      isDropSet: false,
+    };
 
     const response = await fetch(`/api/workouts/${activeWorkout._id}/set`, {
       method: "PATCH",
@@ -330,6 +456,7 @@ export default function HomePage() {
         reps: Number(values.reps),
         weight: Number(values.weight),
         rpe: Number(values.rpe),
+        isDropSet: values.isDropSet,
         completed: true,
       }),
     });
@@ -403,7 +530,9 @@ export default function HomePage() {
               className="glass rounded-3xl p-4 sm:p-6"
               onSubmit={handleProgramCreate}
             >
-              <h2 className="text-xl font-bold">Create Workout Program</h2>
+              <h2 className="text-xl font-bold">
+                {editingProgramId ? "Edit Workout Program" : "Create Workout Program"}
+              </h2>
               <div className="mt-4 grid gap-3">
                 <input
                   className="field"
@@ -574,8 +703,21 @@ export default function HomePage() {
                   disabled={loading}
                   className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
                 >
-                  {loading ? "Saving..." : "Save Program"}
+                  {loading
+                    ? "Saving..."
+                    : editingProgramId
+                      ? "Update Program"
+                      : "Save Program"}
                 </button>
+                {editingProgramId ? (
+                  <button
+                    type="button"
+                    className="rounded-xl bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-800"
+                    onClick={cancelEditProgram}
+                  >
+                    Cancel Edit
+                  </button>
+                ) : null}
               </div>
             </form>
 
@@ -583,19 +725,33 @@ export default function HomePage() {
               <h3 className="text-lg font-bold">Saved Programs</h3>
               <div className="mt-3 space-y-2">
                 {programs.map((program) => (
-                  <button
+                  <div
                     key={program._id}
-                    onClick={() => {
-                      setSelectedProgramId(program._id || "");
-                      setActiveTab("workout");
-                    }}
                     className="w-full rounded-xl border border-white/40 bg-white/80 p-3 text-left"
                   >
                     <p className="font-semibold">{program.name}</p>
                     <p className="text-xs text-slate-600">
                       {program.exercises.length} exercises
                     </p>
-                  </button>
+
+                    <div className="mt-2 flex gap-2">
+                      <button
+                        className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white"
+                        onClick={() => {
+                          setSelectedProgramId(program._id || "");
+                          setActiveTab("workout");
+                        }}
+                      >
+                        Track
+                      </button>
+                      <button
+                        className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-slate-800"
+                        onClick={() => handleEditProgram(program)}
+                      >
+                        Edit
+                      </button>
+                    </div>
+                  </div>
                 ))}
               </div>
             </aside>
@@ -653,6 +809,7 @@ export default function HomePage() {
                   {exercisesForSelectedDay.map((exercise, idx) => {
                     const done = completedCount(exercise.name);
                     const isCurrent = exercise.name === selectedExercise;
+                    const totalSets = renderedSetCount(exercise.name);
                     return (
                       <button
                         key={`${exercise.name}-${idx}`}
@@ -665,8 +822,7 @@ export default function HomePage() {
                       >
                         <p className="font-semibold">{exercise.name}</p>
                         <p className="text-xs text-slate-600">
-                          {done}/{exercise.sets} sets completed{" "}
-                          {done >= exercise.sets ? "✓" : ""}
+                          {done}/{totalSets} sets completed {done >= totalSets ? "✓" : ""}
                         </p>
                       </button>
                     );
@@ -684,13 +840,25 @@ export default function HomePage() {
                     your past 3 workouts.
                   </p>
 
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white"
+                      onClick={() => addSetRow(selectedExercise, false)}
+                    >
+                      + Add Set
+                    </button>
+                    <button
+                      className="rounded-lg bg-orange-100 px-3 py-2 text-xs font-semibold text-orange-800"
+                      onClick={() => addSetRow(selectedExercise, true)}
+                    >
+                      + Add Drop Set
+                    </button>
+                  </div>
+
                   <div className="mt-3 space-y-3">
                     {Array.from(
                       {
-                        length:
-                          exercisesForSelectedDay.find(
-                            (e) => e.name === selectedExercise,
-                          )?.sets || 0,
+                        length: renderedSetCount(selectedExercise),
                       },
                       (_, idx) => {
                         const setNumber = idx + 1;
@@ -706,14 +874,17 @@ export default function HomePage() {
                           reps: recommendation?.recommendedReps || 10,
                           weight: recommendation?.recommendedWeight || 20,
                           rpe: recommendation?.recommendedRpe || 7,
+                          isDropSet: false,
                         };
 
-                        const completed = activeWorkout.sets.some(
+                        const matchedSet = activeWorkout.sets.find(
                           (set) =>
                             set.exerciseName === selectedExercise &&
-                            set.setNumber === setNumber &&
-                            set.completed,
+                            set.setNumber === setNumber,
                         );
+
+                        const completed = Boolean(matchedSet?.completed);
+                        const isDropSet = input.isDropSet || Boolean(matchedSet?.isDropSet);
 
                         return (
                           <div
@@ -726,6 +897,23 @@ export default function HomePage() {
                                 {completed ? "Saved ✓" : "Pending"}
                               </p>
                             </div>
+
+                            <label className="mb-2 flex items-center gap-2 text-xs font-semibold text-slate-700">
+                              <input
+                                type="checkbox"
+                                checked={isDropSet}
+                                onChange={(e) =>
+                                  setDropFlag(
+                                    selectedDay,
+                                    selectedExercise,
+                                    setNumber,
+                                    e.target.checked,
+                                  )
+                                }
+                              />
+                              Mark as Drop Set
+                            </label>
+
                             <div className="grid grid-cols-3 gap-2">
                               <input
                                 className="field"
@@ -778,6 +966,11 @@ export default function HomePage() {
                             </div>
 
                             <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-700">
+                              {isDropSet ? (
+                                <span className="badge bg-orange-100 text-orange-800">
+                                  Drop Set
+                                </span>
+                              ) : null}
                               <span className="badge">
                                 Suggested:{" "}
                                 {recommendation?.recommendedReps || 10} reps

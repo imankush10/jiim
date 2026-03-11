@@ -4,10 +4,11 @@ import { addWorkoutSet } from "@/lib/db";
 
 const schema = z.object({
   exerciseName: z.string().min(1),
-  setNumber: z.number().int().min(1).max(20),
+  setNumber: z.number().int().min(1).max(50),
   reps: z.number().int().min(0).max(100),
   weight: z.number().min(0).max(1000),
   rpe: z.number().min(1).max(10),
+  isDropSet: z.boolean().optional(),
   completed: z.boolean().default(true),
 });
 

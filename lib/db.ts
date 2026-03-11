@@ -50,6 +50,27 @@ export async function createProgram(
   };
 }
 
+export async function updateProgramById(
+  programId: string,
+  input: Omit<WorkoutProgram, "_id" | "createdAt">,
+) {
+  const db = await getDb();
+
+  const res = await db.collection<ProgramDocument>("programs").findOneAndUpdate(
+    { _id: new ObjectId(programId) },
+    {
+      $set: {
+        name: input.name,
+        description: input.description,
+        exercises: input.exercises,
+      },
+    },
+    { returnDocument: "after" },
+  );
+
+  return res ? toStringId(res) : null;
+}
+
 export async function startWorkout(
   programId: string,
   programName: string,
